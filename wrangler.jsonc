@@ -14,7 +14,7 @@
     {
       "binding": "DB",
       "database_name": "dcv-research",
-      "database_id": "REPLACE_WITH_D1_DATABASE_ID",
+      "database_id": "d8301616-d97a-417a-ba22-228cb3b74a6f",
       "migrations_dir": "migrations"
     }
   ],

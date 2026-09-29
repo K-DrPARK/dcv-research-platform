@@ -1,0 +1,40 @@
+{
+  "$schema": "./node_modules/wrangler/config-schema.json",
+  "name": "dcv-research-platform",
+  "main": "src/index.js",
+  "compatibility_date": "2026-09-30",
+  "observability": { "enabled": true },
+  "assets": {
+    "directory": "./public",
+    "binding": "ASSETS",
+    "run_worker_first": true
+  },
+  "ai": { "binding": "AI" },
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "dcv-research",
+      "database_id": "REPLACE_WITH_D1_DATABASE_ID",
+      "migrations_dir": "migrations"
+    }
+  ],
+  "queues": {
+    "producers": [
+      { "binding": "CDRS_QUEUE", "queue": "dcv-cdrs" }
+    ],
+    "consumers": [
+      { "queue": "dcv-cdrs", "max_batch_size": 1, "max_batch_timeout": 1, "max_retries": 5 }
+    ]
+  },
+  "vars": {
+    "AI_MODEL": "@cf/meta/llama-3.2-1b-instruct",
+    "APP_NAME": "DCV Research Platform",
+    "AUTO_APPROVE": "true",
+    "AUTO_PIPELINE": "true",
+    "MAX_JOBS_PER_TICK": "1",
+    "SIM_BATCH_SIZE": "180"
+  },
+  "triggers": {
+    "crons": ["*/15 * * * *"]
+  }
+}

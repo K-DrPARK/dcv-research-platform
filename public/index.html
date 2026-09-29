@@ -1,0 +1,132 @@
+<!doctype html>
+<html lang="ko" data-bs-theme="dark">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <meta name="theme-color" content="#06101e" />
+  <title>DCV Research Platform</title>
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.8/dist/css/bootstrap.min.css" rel="stylesheet">
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css" rel="stylesheet">
+  <link rel="stylesheet" href="/style.css" />
+</head>
+<body>
+  <div class="ambient-grid"></div>
+  <nav class="navbar fixed-top dcv-navbar" aria-label="DCV primary navigation">
+    <div class="container-fluid px-3 px-lg-4">
+      <button class="navbar-toggler dcv-hamburger" type="button" data-bs-toggle="offcanvas" data-bs-target="#dcvMenu" aria-controls="dcvMenu" aria-label="메뉴 열기">
+        <span></span><span></span><span></span>
+      </button>
+      <a class="navbar-brand d-flex align-items-center gap-3 ms-2" href="#">
+        <span class="brand-mark"><i class="bi bi-hexagon-fill"></i></span>
+        <span><b>DCV</b><small>RESEARCH PLATFORM</small></span>
+      </a>
+      <div class="nav-search d-none d-md-flex ms-auto me-3">
+        <i class="bi bi-search"></i><input id="globalSearch" placeholder="연구 프로젝트, 데이터, 후보 설계를 검색하세요..." aria-label="검색">
+        <kbd>/</kbd>
+      </div>
+      <button id="refreshBtn" class="icon-btn" title="새로고침"><i class="bi bi-arrow-clockwise"></i></button>
+      <button id="tokenBtn" class="profile-chip ms-2"><span class="avatar">R</span><span class="d-none d-lg-block"><b>박사 연구자</b><small>연구책임자</small></span></button>
+    </div>
+  </nav>
+
+  <div class="offcanvas offcanvas-start dcv-offcanvas" tabindex="-1" id="dcvMenu" aria-labelledby="dcvMenuLabel">
+    <div class="offcanvas-header">
+      <div class="d-flex align-items-center gap-3"><span class="brand-mark"><i class="bi bi-hexagon-fill"></i></span><div><h5 id="dcvMenuLabel" class="mb-0">DCV</h5><small>RESEARCH PLATFORM</small></div></div>
+      <button type="button" class="btn-close btn-close-white" data-bs-dismiss="offcanvas" aria-label="닫기"></button>
+    </div>
+    <div class="offcanvas-body">
+      <div class="menu-kicker">RESEARCH OS</div>
+      <nav class="dcv-menu">
+        <a class="active" href="#dashboard" data-bs-dismiss="offcanvas"><i class="bi bi-grid-1x2"></i><span>홈 대시보드<small>Home</small></span></a>
+        <a href="#projectsSection" data-bs-dismiss="offcanvas"><i class="bi bi-layers"></i><span>연구 프로젝트<small>Research Projects</small></span></a>
+        <a href="#dataSection" data-bs-dismiss="offcanvas"><i class="bi bi-database"></i><span>외부 데이터 수집<small>External Data</small></span></a>
+        <a href="#computeSection" data-bs-dismiss="offcanvas"><i class="bi bi-cpu"></i><span>계산 엔진<small>CDRS Compute Engine</small></span></a>
+        <a href="#validateSection" data-bs-dismiss="offcanvas"><i class="bi bi-shield-check"></i><span>검증 및 분석<small>Validation & Analysis</small></span></a>
+        <a href="#recomputeSection" data-bs-dismiss="offcanvas"><i class="bi bi-arrow-repeat"></i><span>재계산 비교<small>Recompute Comparison</small></span></a>
+        <a href="#approvalSection" data-bs-dismiss="offcanvas"><i class="bi bi-person-check"></i><span>승인 워크플로우<small>Approval Workflow</small></span></a>
+        <a href="#reportSection" data-bs-dismiss="offcanvas"><i class="bi bi-file-earmark-bar-graph"></i><span>논문 및 리포트<small>Papers & Reports</small></span></a>
+      </nav>
+      <div class="offcanvas-quote"><span>HUMAN × AI × SOCIETY</span><p>데이터로 증명하는<br>신뢰 가능한 위임의 경계.</p></div>
+    </div>
+  </div>
+
+  <main id="dashboard" class="container-fluid dcv-shell px-3 px-xl-4">
+    <section class="hero-panel">
+      <div class="hero-copy">
+        <div class="eyebrow"><span></span> DOCTORAL RESEARCH OPERATING SYSTEM</div>
+        <h1><span>DCV</span> Research Platform</h1>
+        <h2>위임 가능 영역 연구 플랫폼</h2>
+        <p>데이터로 탐구하는 인간–AI 협업의 경계. 정의부터 강건 검증, 인간 보정, 최종 승인까지 하나의 재현 가능한 연구 흐름으로 연결합니다.</p>
+      </div>
+      <div class="hero-visual" aria-hidden="true"><div class="gate gate-a"></div><div class="gate gate-b"></div><div class="horizon"></div><div class="seoul-lines"></div></div>
+      <div class="hero-side d-none d-xl-block"><span>RESEARCH FOR</span><b>A MORE<br>DELEGABLE<br>TOMORROW</b><small>더 많이 위임할 수 있는,<br>더 신뢰할 수 있는 사회를 위해.</small></div>
+    </section>
+
+    <section class="workflow-ribbon" id="workflowRibbon"></section>
+
+    <section class="row g-3 mt-1" id="stats"></section>
+
+    <section class="row g-3 mt-1" id="computeSection">
+      <div class="col-12 col-xxl-7">
+        <article class="glass-panel h-100">
+          <div class="panel-head"><div><span class="panel-icon"><i class="bi bi-bounding-box-circles"></i></span><b>위임 가능 영역</b><small>Delegation Feasible Region · σ × α</small></div><span id="regionBadge" class="status-pill neutral">NO PROJECT</span></div>
+          <div class="chart-wrap"><canvas id="regionCanvas" height="440"></canvas><div class="chart-legend"><span><i class="dot feasible"></i>CONFIRMED</span><span><i class="dot unresolved"></i>BOUNDARY</span><span><i class="dot infeasible"></i>INFEASIBLE</span></div></div>
+        </article>
+      </div>
+      <div class="col-12 col-xxl-5">
+        <div class="row g-3 h-100">
+          <div class="col-12 col-md-6 col-xxl-12">
+            <article class="glass-panel compact h-100" id="validateSection">
+              <div class="panel-head"><div><span class="panel-icon"><i class="bi bi-shield-check"></i></span><b>CDRS Evidence</b><small>Constraint-aware boundary evidence</small></div></div>
+              <div id="evidenceMetrics" class="evidence-grid"></div>
+            </article>
+          </div>
+          <div class="col-12 col-md-6 col-xxl-12">
+            <article class="glass-panel compact h-100" id="recomputeSection">
+              <div class="panel-head"><div><span class="panel-icon"><i class="bi bi-arrow-repeat"></i></span><b>Minimax Regret & Recompute</b><small>Safety first, regret second</small></div></div>
+              <div id="regretPanel" class="regret-panel"></div>
+            </article>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="row g-3 mt-1" id="projectsSection">
+      <div class="col-12 col-xl-8">
+        <article class="glass-panel">
+          <div class="panel-head"><div><span class="panel-icon"><i class="bi bi-layers"></i></span><b>연구 프로젝트</b><small>Research Projects</small></div><button class="btn-future" id="newProjectBtn"><i class="bi bi-plus-lg"></i> 새 연구</button></div>
+          <div id="projects" class="project-list"></div>
+        </article>
+      </div>
+      <div class="col-12 col-xl-4" id="approvalSection">
+        <article class="glass-panel h-100">
+          <div class="panel-head"><div><span class="panel-icon gold"><i class="bi bi-person-check"></i></span><b>승인 워크플로우</b><small>Approval Workflow</small></div></div>
+          <div id="approvalPanel"></div>
+        </article>
+      </div>
+    </section>
+
+    <section class="glass-panel mt-3 d-none" id="detailPanel">
+      <div class="panel-head flex-wrap gap-2"><div><span class="panel-icon"><i class="bi bi-diagram-3"></i></span><b id="detailTitle">프로젝트 상세</b><small id="detailSub">CDRS execution detail</small></div><div class="d-flex gap-2"><button class="btn-ghost" id="runBtn"><i class="bi bi-play-fill"></i> 자동 진행 1회</button><button class="btn-future" id="reportBtn"><i class="bi bi-file-text"></i> 보고서</button></div></div>
+      <div id="pipeline" class="detail-pipeline"></div>
+      <div class="row g-3 mt-1">
+        <div class="col-12" id="empiricalSection"><div class="subpanel empirical-panel"><div class="d-flex flex-wrap justify-content-between gap-2 align-items-start"><div><h3>Empirical Calibration Registry</h3><p class="mb-1">CBDC_PAPER n=81 published anchor · estimated / literature-bounded / author-calibrated / design 변수를 분리 저장합니다.</p><div id="empiricalStatus" class="small text-secondary">프로젝트를 열면 empirical readiness가 표시됩니다.</div></div><div class="d-flex gap-2"><button id="empiricalViewBtn" class="btn-ghost" type="button"><i class="bi bi-braces"></i> 파라미터 보기</button><button id="empiricalRefitBtn" class="btn-future" type="button"><i class="bi bi-graph-up"></i> 로컬 OLS 재추정</button></div></div><details class="mt-3"><summary>81개 episode JSON 가져오기</summary><textarea id="episodeJson" class="form-control mt-2" rows="5" placeholder='[{"episode_name":"...","year":2023,"peak_outflow":0.18,"concentration":0.85,"digital_adoption":0.92,"severity":0.78,"failed":1,"provenance_type":"verified"}]'></textarea><button id="episodeImportBtn" class="btn-ghost mt-2" type="button">Episode rows import</button></details><pre id="empiricalDetails" class="report-view mt-3 d-none"></pre></div></div>
+        <div class="col-12 col-xl-4" id="dataSection"><div class="subpanel"><h3>외부 데이터 소스</h3><form id="sourceForm"><input class="form-control" name="name" placeholder="소스 이름" required><input class="form-control" name="url" placeholder="https://api.example.com/data" required><div class="row g-2"><div class="col-4"><select class="form-select" name="kind"><option value="json">JSON</option><option value="csv">CSV</option><option value="text">TEXT</option><option value="episodes">EMPIRICAL EPISODES</option></select></div><div class="col-8"><input class="form-control" name="value_path" placeholder="값 경로: data.value"></div></div><input class="form-control" name="rows_path" placeholder="배열 경로: items"><button class="btn-future w-100" type="submit">데이터 소스 등록</button></form></div></div>
+        <div class="col-12 col-xl-4"><div class="subpanel"><h3>인간 검토자 실험</h3><p>ARR·오류 복구·검토 지연을 측정하여 empirical reviewer model을 추정합니다.</p><button id="trialBtn" class="btn-ghost w-100">실험 1회 시작</button><div id="trial"></div></div></div>
+        <div class="col-12 col-xl-4"><div class="subpanel"><h3>최근 실행 작업</h3><div id="jobs" class="job-list"></div></div></div>
+      </div>
+    </section>
+
+    <section class="glass-panel mt-3" id="reportSection">
+      <div class="platform-footer"><div><b>DCV RESEARCH PLATFORM</b><span>Define → Measure → Compute → Validate → Recompute → Approve</span></div><p>위임이 가능한 더 나은 사회를 향한 데이터 기반 연구 플랫폼</p><div>HUMAN <i>×</i> AI <i>×</i> SOCIETY</div></div>
+    </section>
+  </main>
+
+  <div class="modal fade" id="newModal" tabindex="-1"><div class="modal-dialog modal-dialog-centered"><div class="modal-content future-modal"><div class="modal-header"><h5 class="modal-title">새 DCV 연구 생성</h5><button class="btn-close btn-close-white" data-bs-dismiss="modal"></button></div><form id="newForm"><div class="modal-body"><label class="form-label">연구명</label><input class="form-control" name="name" required placeholder="예: 공공 바우처 지급정지 위임 영역"><label class="form-label mt-3">연구질문</label><textarea class="form-control" name="rq" rows="4" placeholder="잡음과 승인 지연 하에서..."></textarea></div><div class="modal-footer"><button type="button" class="btn-ghost" data-bs-dismiss="modal">취소</button><button class="btn-future" type="submit">생성 및 자동 실행</button></div></form></div></div></div>
+  <div class="modal fade" id="reportModal" tabindex="-1"><div class="modal-dialog modal-xl modal-dialog-scrollable"><div class="modal-content future-modal"><div class="modal-header"><h5 class="modal-title">자동 연구 보고서</h5><button class="btn-close btn-close-white" data-bs-dismiss="modal"></button></div><div class="modal-body"><pre id="reportText" class="report-view"></pre></div></div></div></div>
+  <div class="modal fade" id="tokenModal" tabindex="-1"><div class="modal-dialog modal-dialog-centered"><div class="modal-content future-modal"><div class="modal-header"><h5 class="modal-title">관리 토큰</h5><button class="btn-close btn-close-white" data-bs-dismiss="modal"></button></div><div class="modal-body"><input id="tokenInput" class="form-control" type="password" placeholder="ADMIN_TOKEN"><small class="text-secondary">토큰은 이 브라우저의 sessionStorage에만 저장됩니다.</small></div><div class="modal-footer"><button id="saveTokenBtn" class="btn-future">저장</button></div></div></div></div>
+
+  <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.8/dist/js/bootstrap.bundle.min.js"></script>
+  <script type="module" src="/app.js"></script>
+</body>
+</html>

@@ -2,7 +2,7 @@ import { json, nowIso, uid, safeJson } from './lib/util.js';
 import { requireAdmin } from './lib/auth.js';
 import { all, one, run, enqueue, audit } from './lib/db.js';
 import { processJobs, scheduleAll, advanceProject } from './lib/orchestrator.js';
-import { generateReport } from './lib/report.js';
+import { generateReport, upgradeStoredReport } from './lib/report.js';
 import { buildThesisData, exportCsv, EXPORT_NAMES } from './lib/thesis.js';
 import { aiJson } from './lib/ai.js';
 import { empiricalReadiness, ensureEmpiricalProfile, importEmpiricalEpisodes, refitEmpiricalCalibration, loadEmpiricalCalibration } from './lib/empirical.js';
@@ -89,7 +89,7 @@ async function api(request,env){
       const rows=await all(env.DB,`SELECT c.*, (SELECT status FROM validations v WHERE v.candidate_id=c.id AND v.validation_type='human_recompute' ORDER BY created_at DESC LIMIT 1) final_status FROM design_candidates c WHERE project_id=? ORDER BY sigma,authority_k,delay_d LIMIT 500`,[projectId]); return json({candidates:rows});
     }
     if(parts[3]==='report' && method==='GET'){
-      const r=await one(env.DB,`SELECT * FROM reports WHERE project_id=? ORDER BY created_at DESC LIMIT 1`,[projectId]); return r?json({...r,data:safeJson(r.data_json,{})}):json({error:'report_not_ready'},404);
+      let r=await one(env.DB,`SELECT * FROM reports WHERE project_id=? ORDER BY created_at DESC LIMIT 1`,[projectId]); if(r){ try{ r=await upgradeStoredReport(env,projectId,r); }catch(e){ /* 구버전 보고서는 그대로 반환 */ } } return r?json({...r,data:safeJson(r.data_json,{})}):json({error:'report_not_ready'},404);
     }
     if(parts[3]==='report' && method==='POST'){ return json(await generateReport(env,projectId)); }
     if(parts[3]==='thesis' && method==='GET'){ try{ return json(await buildThesisData(env,projectId)); }catch(e){ return json({error:String(e.message||e)},e.message==='project_not_found'?404:500); } }

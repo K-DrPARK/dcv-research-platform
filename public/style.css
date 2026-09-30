@@ -9,3 +9,6 @@
 .empirical-panel details summary{cursor:pointer;color:#8fdcf0;font-weight:650;letter-spacing:.02em}
 .empirical-panel textarea{font-family:ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,monospace;font-size:.78rem;background:rgba(2,12,21,.78);color:#c9f7ff;border-color:rgba(66,194,225,.20)}
 .empirical-panel .report-view{max-height:340px;background:rgba(1,10,18,.82);border:1px solid rgba(66,194,225,.15);border-radius:14px;padding:14px;color:#a9cedb;font-size:.74rem}
+
+[id$="Section"],#dashboard{scroll-margin-top:88px}
+.dcv-menu a{cursor:pointer}

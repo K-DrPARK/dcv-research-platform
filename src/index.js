@@ -3,6 +3,8 @@ import { requireAdmin } from './lib/auth.js';
 import { all, one, run, enqueue, audit } from './lib/db.js';
 import { processJobs, scheduleAll, advanceProject } from './lib/orchestrator.js';
 import { generateReport } from './lib/report.js';
+import { buildThesisData, exportCsv, EXPORT_NAMES } from './lib/thesis.js';
+import { aiJson } from './lib/ai.js';
 import { empiricalReadiness, ensureEmpiricalProfile, importEmpiricalEpisodes, refitEmpiricalCalibration, loadEmpiricalCalibration } from './lib/empirical.js';
 
 async function bodyJson(request){ try{return await request.json();}catch{return {};} }
@@ -90,9 +92,20 @@ async function api(request,env){
       const r=await one(env.DB,`SELECT * FROM reports WHERE project_id=? ORDER BY created_at DESC LIMIT 1`,[projectId]); return r?json({...r,data:safeJson(r.data_json,{})}):json({error:'report_not_ready'},404);
     }
     if(parts[3]==='report' && method==='POST'){ return json(await generateReport(env,projectId)); }
+    if(parts[3]==='thesis' && method==='GET'){ try{ return json(await buildThesisData(env,projectId)); }catch(e){ return json({error:String(e.message||e)},e.message==='project_not_found'?404:500); } }
+    if(parts[3]==='export' && parts[4] && method==='GET'){
+      const name=parts[4].replace(/\.csv$/,'');
+      if(!EXPORT_NAMES.includes(name)) return json({error:'unknown_export',available:EXPORT_NAMES},404);
+      const body=await exportCsv(env,projectId,name);
+      return new Response(body,{headers:{'content-type':'text/csv; charset=utf-8','content-disposition':`attachment; filename="${name}.csv"`}});
+    }
     if(parts[3]==='audit' && method==='GET'){ return json({audit:await all(env.DB,`SELECT * FROM audit_log WHERE project_id=? ORDER BY created_at DESC LIMIT 300`,[projectId])}); }
   }
 
+  if(url.pathname==='/api/ai/test' && method==='GET'){
+    const r=await aiJson(env,'You are a test assistant.','Say hello in Korean.',{ok:false},{schemaHint:'{"ok":true,"message":"string"}',maxTokens:100});
+    return json({binding:!!env.AI,configured_model:env.AI_MODEL||null,result:r});
+  }
   if(url.pathname==='/api/jobs/process' && method==='POST') return json({results:await processJobs(env)});
   if(url.pathname==='/api/schedule' && method==='POST') return json({results:await scheduleAll(env)});
 

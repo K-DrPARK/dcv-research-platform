@@ -126,3 +126,17 @@ Parameter provenance is explicit:
 - `design` / `tuned`: DCV delegation and estimator choices.
 
 This distinction is critical for the dissertation: `K`, `W`, `m` remain design variables; `alpha` is tuned; operational `tau` and approval delay `d` require timestamp/log data rather than being mislabeled as empirical estimates.
+
+## 논문 도구 (v0.4.0)
+프로젝트를 연 뒤 상세 패널의 **논문 도구** 버튼에서 다음을 내려받을 수 있습니다.
+
+| 항목 | 형식 | 용도 |
+|---|---|---|
+| 논문 패키지 | ZIP | 아래 전부 + README |
+| 보고서 | MD / HTML / Word(.doc) | HTML은 인쇄(Ctrl+P)로 PDF 저장 |
+| 그림 5종 | PNG(×2~×4) / SVG | 본문 삽입, SVG는 Illustrator·Inkscape에서 편집 |
+| 표·원자료 | CSV (Excel 호환) | 부록·재분석 |
+| 전체 집계 | JSON | 보고서 수치의 원천 |
+
+자세한 사용법과 논문 각 장에 대응시키는 방법은 `docs/THESIS_GUIDE.md`를 참고하세요.
+

@@ -2,7 +2,7 @@
   "$schema": "./node_modules/wrangler/config-schema.json",
   "name": "dcv-research-platform",
   "main": "src/index.js",
-  "compatibility_date": "2026-09-01",
+  "compatibility_date": "2026-09-30",
   "observability": { "enabled": true },
   "assets": {
     "directory": "./public",
@@ -27,7 +27,7 @@
     ]
   },
   "vars": {
-    "AI_MODEL": "@cf/meta/llama-3.2-1b-instruct",
+    "AI_MODEL": "@cf/meta/llama-3.1-8b-instruct",
     "APP_NAME": "DCV Research Platform",
     "AUTO_APPROVE": "true",
     "AUTO_PIPELINE": "true",

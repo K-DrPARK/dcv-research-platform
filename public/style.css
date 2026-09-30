@@ -12,3 +12,10 @@
 
 [id$="Section"],#dashboard{scroll-margin-top:88px}
 .dcv-menu a{cursor:pointer}
+.btn-ghost.sm{padding:3px 10px;font-size:12px}.fig-quick{display:inline-flex;gap:6px;margin-right:8px;vertical-align:middle}
+.dcv-toast{position:fixed;left:50%;bottom:28px;transform:translate(-50%,20px);background:#0d2a3a;color:#dff6ff;border:1px solid #27e0ff66;padding:10px 18px;border-radius:10px;opacity:0;pointer-events:none;transition:.25s;z-index:2000;font-size:14px;max-width:90vw}.dcv-toast.show{opacity:1;transform:translate(-50%,0)}
+@keyframes dcvFlash{0%{box-shadow:0 0 0 0 #27e0ff99}100%{box-shadow:0 0 0 22px #27e0ff00}}#detailPanel.flash{animation:dcvFlash 1.1s ease-out 1}
+.thesis-body section{margin-bottom:22px}.thesis-body h6{font-weight:700;margin-bottom:8px}
+.fig-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:14px}.fig-card{background:#fff;color:#111;border-radius:10px;padding:10px}.fig-card .btn-ghost{color:#0b3d52;border-color:#0b3d5255;background:#f3f9fb}.fig-prev svg{width:100%;height:auto;display:block}.fig-cap{font-size:12px;margin:6px 0 8px;color:#333}
+.report-html{background:#fff;color:#111;border-radius:10px;padding:22px 26px;line-height:1.7;font-size:14px}.report-html h1{font-size:22px}.report-html h2{font-size:18px;margin-top:1.6em;border-bottom:1px solid #aaa;padding-bottom:.2em}.report-html h3{font-size:15px;margin-top:1.2em}.report-html table{border-collapse:collapse;width:100%;font-size:12.5px;margin:.3em 0 1.1em;display:block;overflow-x:auto}.report-html th,.report-html td{padding:4px 8px;text-align:left;vertical-align:top;white-space:nowrap}.report-html thead th{border-top:1.5px solid #111;border-bottom:1px solid #111}.report-html tbody tr:last-child td{border-bottom:1.5px solid #111}.report-html blockquote{border-left:3px solid #999;background:#f5f5f5;margin:.8em 0;padding:.4em .9em;color:#444}.report-html figure{text-align:center;margin:1em 0 .2em}.report-html figure svg{max-width:100%;height:auto}.report-html p.tcap{font-weight:700;margin-bottom:.2em}.report-html p.fcap{text-align:center;color:#333;font-size:12.5px}
+

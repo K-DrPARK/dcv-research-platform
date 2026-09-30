@@ -127,16 +127,20 @@ Parameter provenance is explicit:
 
 This distinction is critical for the dissertation: `K`, `W`, `m` remain design variables; `alpha` is tuned; operational `tau` and approval delay `d` require timestamp/log data rather than being mislabeled as empirical estimates.
 
-## 논문 도구 (v0.4.0)
+## 논문 도구 (v0.4.1)
 프로젝트를 연 뒤 상세 패널의 **논문 도구** 버튼에서 다음을 내려받을 수 있습니다.
 
 | 항목 | 형식 | 용도 |
 |---|---|---|
 | 논문 패키지 | ZIP | 아래 전부 + README |
-| 보고서 | MD / HTML / Word(.doc) | HTML은 인쇄(Ctrl+P)로 PDF 저장 |
+| 보고서 | **Word(.docx)** / Markdown+그림(ZIP) / HTML | .docx는 표·그림 포함 편집 가능. HTML은 인쇄(Ctrl+P)로 PDF 저장 |
 | 그림 5종 | PNG(×2~×4) / SVG | 본문 삽입, SVG는 Illustrator·Inkscape에서 편집 |
 | 표·원자료 | CSV (Excel 호환) | 부록·재분석 |
 | 전체 집계 | JSON | 보고서 수치의 원천 |
 
 자세한 사용법과 논문 각 장에 대응시키는 방법은 `docs/THESIS_GUIDE.md`를 참고하세요.
 
+
+
+## 보고서의 연구모형 절 (v0.4.2)
+보고서 **1절**에 박사논문 전체 연구모형(연구대상·연구질문·연구설계·명제·변수·계산 산식·그림 M1~M3)이 자동 포함됩니다. 구현은 `public/model.js`(내용), `public/mathtext.js`(수식 파서), `public/figures.js`(그림 M1~M3)입니다. 수식은 Markdown에서 `$$ \\sigma\\le c_{j} $$ (n)` 형태로 쓰며 HTML·Word에서 모두 렌더링됩니다. 기존에 생성해 둔 보고서는 열 때 자동으로 이 절이 추가되고, 새로 생성하려면 "AI 요약 재생성"을 누르세요.

@@ -1,4 +1,26 @@
+# v0.5.0 — Defense Rigor / International Review Hardening
+
+- 확증 분석 전 연구 프로토콜 SHA-256 동결 및 protocol drift 차단
+- 확증/강건 단계 Bonferroni family-wise 다중비교 보정
+- n=81 패널 stratified bootstrap + reconstructed measurement-error 전파
+- theta3 digital 계수를 historical calibration에 사용하지 않도록 수정
+- FP/FN 손실계수를 direct cost가 아닌 empirical proxy로 명시하고 proxy-range sensitivity 추가
+- 인간 검토자 모델을 관측건수 기준에서 participant-cluster bootstrap 기준으로 강화
+- 최소 인간실험 sample gate(참가자/정답/오답 trial) 추가
+- 교차사례 검증을 slope sign 하나에서 shared-grid Spearman + boundary MAE + slope 일치 기준으로 강화
+- 자동 승인을 COMPUTATIONALLY_CONFIRMED로 제한하고 SCIENTIFICALLY_APPROVED는 사람의 수동 sign-off로 분리
+- 보고서에 Claim Scope Matrix, 프로토콜 해시, 다중비교, calibration uncertainty, proxy identification 한계 자동 표기
+- 신규 migration 0006_defense_rigor.sql 및 rigor test 추가
+
 # Changelog
+
+## 0.4.3
+- FP/FN 용어를 엔진 기준으로 전면 통일: FP=정지 오판(정상지급 차단), FN=정지 누락(부정지급·유출 미차단).
+- 표 M5의 과거 용어 대응 주의문 삭제, 표 2/6/8 및 연구모형 그림 라벨 수정.
+- 81개 위기 사례 패널 기반 경험적 손실 보정 추가: 실패/비실패 peak_outflow 층화로 c_FN/c_FP, q95, 검토·재조정 비용 스케일 도출.
+- 식 18~24와 compute.js 손실/목적함수를 같은 경험적 스케일로 교체; 임의 0.45/1.4, 0.045/0.012, K 손실배수, 목적함수 임의 가중치 제거.
+- 패키지에 crisis_episodes_platform.json 포함 및 UI/API에서 내장 81개 사례 적재+OLS 재보정 지원.
+- A3형 '박사논문 연구모형 전체 설계도'(그림 M0) 자동 생성 및 Word/HTML/Markdown 보고서에 포함.
 
 ## v0.4.2 — 보고서에 박사논문 연구모형 전체 설계 추가
 - Added: 보고서 **1절 "박사논문 연구모형 전체 설계"** (자동 생성 보고서, Word·HTML·Markdown 공통). 구성: 1.1 연구대상 · 1.2 연구모형(데이터–결정 사슬) · 1.3 연구질문 RQ1~3 · 1.4 연구설계(DCV-C 단계·게이트 판정 규칙) · 1.5 연구명제 P1~P4 · 1.6 변수·설계벡터 · 1.7 계산 산식 · 1.8 위임 가능 영역 개념도와 증거수준. 이후 절 번호는 2~10으로 이동.
@@ -6,7 +28,6 @@
 - Added: **계산 산식 37개(번호 자동 부여)**: 설계벡터, 잠재상태·관측, 실증 채널 Π, EMA/Kalman/변화점/적응형 추정기, 신뢰도 Φ, 검토 규칙(K0~K3), 손실·복구(safe mode)·목적함수 J, 제약·위임 가능 영역 𝒟, Wilson 구간, FEASIBLE/INFEASIBLE/UNRESOLVED 판정, 경계 점수, 시드 분리, ±40% 27조합 stress, Regret·Minimax Regret·x*, 실증 회귀, ARR·ERT, 인간 행동 재투입(𝒟_ideal→𝒟_human). 엔진(`compute.js`)의 실제 연산·기본값과 대응시켰고, 기본값은 프로젝트 벤치마크 설정을 우선 사용.
 - Added: **수식 렌더링**(`public/mathtext.js`): 보고서 Markdown에서 `$$ … $$ (n)` 별행 수식, `$…$` 인라인 수식. 그리스 문자·아래/위첨자·분수·집합 기호 지원. 보고서 창·HTML에서는 수식 블록, Word(.docx)에서는 Cambria Math 네이티브 첨자 런으로 나오는 "Equation" 스타일 문단(번호 우측 정렬).
 - Added: 이전 버전으로 저장된 보고서를 열면 저장된 요약·논의 문장은 유지한 채 연구모형 절을 자동으로 추가(`upgradeStoredReport`, AI 재호출 없음).
-- Note: 엔진의 FP는 "정지 오판(정상지급 차단)", FN은 "정지 누락(부정지급·유출)"이다. 연구모형 문서의 False Payment/False Stop 표기와 기호 대응이 반대이므로 보고서 표 M5에 주의 문구를 넣었다. 논문 본문에서는 용어 통일 필요.
 - Tests: `tests/model.test.mjs` 추가(수식 파서, HTML/Word 수식 출력, 수식 번호 연속성·인라인 `$` 짝·미해석 명령 없음, 빈 프로젝트, 저장 보고서 자동 업그레이드). 전체 26개 통과.
 
 ## v0.4.1 — 보고서 Word(.docx) / Markdown+그림 다운로드

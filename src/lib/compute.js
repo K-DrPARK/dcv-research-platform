@@ -1,8 +1,9 @@
 import { all, one, run, audit, enqueue, enqueueMany } from './db.js';
 import { latestDefinition } from './define.js';
 import { nowIso, uid, mulberry32, randn, clamp, safeJson, hashString, mean } from './util.js';
-import { wilson } from './stats.js';
+import { wilson, normInv } from './stats.js';
 import { loadEmpiricalCalibration, empiricalScenarioFromEpisode } from './empirical.js';
+import { ensureFrozenProtocol, assertProtocolIntegrity } from './rigor.js';
 
 const EPS=1e-9;
 const ESTIMATORS=['ema','kalman','changepoint','adaptive'];
@@ -29,8 +30,7 @@ function scenarioFromRow(r,cal){
     empirical_outflow:Number(meta.empirical_outflow??empiricalChannel(cal,S,C)),
     volatility:Number(r?.volatility||1), delay_multiplier:Number(r?.delay_multiplier||1), loss_multiplier:Number(r?.loss_multiplier||1),
     drift:Number(meta.drift||0), rho:Number(meta.rho??0.82), shift_time:Number(meta.shift_time??-1),
-    shift_magnitude:Number(meta.shift_magnitude||0), fraud_cost:Number(meta.fraud_cost||1.4),
-    false_stop_cost:Number(meta.false_stop_cost||0.45), process_noise:Number(meta.process_noise??Math.max(.015,cal.coeff.rmse)),
+    shift_magnitude:Number(meta.shift_magnitude||0), process_noise:Number(meta.process_noise??Math.max(.015,cal.coeff.rmse)),
     provenance:meta.provenance||'scenario_table'
   };
 }
@@ -38,18 +38,32 @@ function syntheticScenarios(cal){
   const baseS=Number(cal.params.baseline_shock?.value??.75), C=Number(cal.params.korea_concentration_anchor?.value??.75), D=Number(cal.params.korea_digital_adoption?.value??.92), rmse=Math.max(.015,cal.coeff.rmse);
   const base=empiricalChannel(cal,baseS,C);
   return [
-    {key:'paper_korea_baseline',name:'Published Korea baseline anchor',severity:baseS,concentration:C,digital:D,empirical_outflow:base,volatility:1,delay_multiplier:1,loss_multiplier:1,drift:0,rho:.82,shift_time:-1,shift_magnitude:0,fraud_cost:1.4,false_stop_cost:.45,process_noise:rmse,provenance:'published_summary_anchor'},
-    {key:'paper_low_shock',name:'Published low-shock sensitivity',severity:.60,concentration:C,digital:D,empirical_outflow:empiricalChannel(cal,.60,C),volatility:1.05,delay_multiplier:1,loss_multiplier:1.05,drift:0,rho:.82,shift_time:-1,shift_magnitude:0,fraud_cost:1.4,false_stop_cost:.45,process_noise:rmse,provenance:'published_summary_anchor'},
-    {key:'paper_high_shock',name:'Published high-shock sensitivity',severity:.90,concentration:C,digital:D,empirical_outflow:empiricalChannel(cal,.90,C),volatility:1.15,delay_multiplier:1.10,loss_multiplier:1.15,drift:0,rho:.80,shift_time:12,shift_magnitude:.10,fraud_cost:1.55,false_stop_cost:.48,process_noise:rmse*1.25,provenance:'published_summary_anchor'},
-    {key:'paper_low_digital',name:'Published low-digital sensitivity',severity:baseS,concentration:C,digital:.30,empirical_outflow:base,volatility:.92,delay_multiplier:1,loss_multiplier:.95,drift:0,rho:.82,shift_time:-1,shift_magnitude:0,fraud_cost:1.35,false_stop_cost:.45,process_noise:rmse,provenance:'published_summary_anchor'}
+    {key:'paper_korea_baseline',name:'Published Korea baseline anchor',severity:baseS,concentration:C,digital:D,empirical_outflow:base,volatility:1,delay_multiplier:1,loss_multiplier:1,drift:0,rho:.82,shift_time:-1,shift_magnitude:0,process_noise:rmse,provenance:'published_summary_anchor'},
+    {key:'paper_low_shock',name:'Published low-shock sensitivity',severity:.60,concentration:C,digital:D,empirical_outflow:empiricalChannel(cal,.60,C),volatility:1.05,delay_multiplier:1,loss_multiplier:1.05,drift:0,rho:.82,shift_time:-1,shift_magnitude:0,process_noise:rmse,provenance:'published_summary_anchor'},
+    {key:'paper_high_shock',name:'Published high-shock sensitivity',severity:.90,concentration:C,digital:D,empirical_outflow:empiricalChannel(cal,.90,C),volatility:1.15,delay_multiplier:1.10,loss_multiplier:1.15,drift:0,rho:.80,shift_time:12,shift_magnitude:.10,process_noise:rmse*1.25,provenance:'published_summary_anchor'},
+    {key:'paper_low_digital',name:'Published low-digital sensitivity',severity:baseS,concentration:C,digital:.30,empirical_outflow:base,volatility:.92,delay_multiplier:1,loss_multiplier:.95,drift:0,rho:.82,shift_time:-1,shift_magnitude:0,process_noise:rmse,provenance:'published_summary_anchor'}
   ];
 }
 function paperStressScenarios(cal){
   const out=[];
   for(const cm of [.6,1,1.4]) for(const dm of [.6,1,1.4]) for(const sm of [.6,1,1.4]){
     const C=clamp(Number(cal.params.korea_concentration_anchor?.value??.75)*cm,0,1),D=clamp(Number(cal.params.korea_digital_adoption?.value??.92)*dm,0,1),S=clamp(Number(cal.params.baseline_shock?.value??.75)*sm,0,1);
-    out.push({key:`paper_wide_${cm}_${dm}_${sm}`,name:`±40% C/D/S (${cm},${dm},${sm})`,severity:S,concentration:C,digital:D,empirical_outflow:empiricalChannel(cal,S,C),volatility:1+.25*Math.abs(sm-1),delay_multiplier:1+.25*Math.max(0,sm-1),loss_multiplier:1+.35*Math.max(0,sm-1),drift:0,rho:.80,shift_time:S>.85?10:-1,shift_magnitude:S>.85?.12:0,fraud_cost:1.4+.25*S,false_stop_cost:.45,process_noise:Math.max(.015,cal.coeff.rmse)*(1+.4*Math.abs(sm-1)),provenance:'paper_robustness_grid'});
+    out.push({key:`paper_wide_${cm}_${dm}_${sm}`,name:`±40% C/D/S (${cm},${dm},${sm})`,severity:S,concentration:C,digital:D,empirical_outflow:empiricalChannel(cal,S,C),volatility:1+.25*Math.abs(sm-1),delay_multiplier:1+.25*Math.max(0,sm-1),loss_multiplier:1+.35*Math.max(0,sm-1),drift:0,rho:.80,shift_time:S>.85?10:-1,shift_magnitude:S>.85?.12:0,process_noise:Math.max(.015,cal.coeff.rmse)*(1+.4*Math.abs(sm-1)),provenance:'paper_robustness_grid'});
   }
+  return out;
+}
+
+function calibrationUncertaintyScenarios(cal){
+  const reps=cal.local_refit?.uncertainty?.representative_draws||[];
+  if(!reps.length)return [];
+  const S=Number(cal.params.baseline_shock?.value??.75),C=Number(cal.params.korea_concentration_anchor?.value??.75),D=Number(cal.params.korea_digital_adoption?.value??.92),rmse=Math.max(.015,cal.coeff.rmse);
+  return reps.map((b,i)=>({key:`calibration_boot_${i}`,name:`Calibration uncertainty draw ${i+1}`,severity:S,concentration:C,digital:D,empirical_outflow:clamp(Number(b.kappa)+Number(b.theta1)*S+Number(b.theta2)*C*S,0,.75),volatility:1,delay_multiplier:1,loss_multiplier:1,drift:0,rho:.82,shift_time:-1,shift_magnitude:0,process_noise:Math.max(.015,Number(b.rmse||rmse)),provenance:'empirical_bootstrap_uncertainty'}));
+}
+function lossProxyScenarios(cal){
+  const L=cal.loss||{}; if(L.identification_status!=='PROXY_ONLY'||!Number.isFinite(Number(L.c_fp))||!Number.isFinite(Number(L.c_fn)))return [];
+  const baseS=Number(cal.params.baseline_shock?.value??.75),C=Number(cal.params.korea_concentration_anchor?.value??.75),D=Number(cal.params.korea_digital_adoption?.value??.92),rmse=Math.max(.015,cal.coeff.rmse);
+  const fps=[Number(L.c_fp_low||L.c_fp),Number(L.c_fp_high||L.c_fp)],fns=[Number(L.c_fn_low||L.c_fn),Number(L.c_fn_high||L.c_fn)],out=[];
+  for(const fp of fps)for(const fn of fns)out.push({key:`loss_proxy_${fp.toFixed(4)}_${fn.toFixed(4)}`,name:'FP/FN proxy-cost sensitivity',severity:baseS,concentration:C,digital:D,empirical_outflow:empiricalChannel(cal,baseS,C),volatility:1,delay_multiplier:1,loss_multiplier:1,c_fp_multiplier:fp/Math.max(EPS,Number(L.c_fp)),c_fn_multiplier:fn/Math.max(EPS,Number(L.c_fn)),drift:0,rho:.82,shift_time:-1,shift_magnitude:0,process_noise:rmse,provenance:'loss_proxy_sensitivity'});
   return out;
 }
 function estimatorStep(kind,state,y,alpha,sigma){
@@ -123,23 +137,30 @@ function simulateEpisode(c,constraints,rng,scenario,reviewer,config){
     if(finalStop&&!shouldStop) fp++;
     if(!finalStop&&shouldStop) fn++;
     const wrong=finalStop!==shouldStop;
-    rollingErrors=.82*rollingErrors+.18*(wrong?1:0);
+    const recAlpha=Number(config.recovery_alpha??.18);
+    rollingErrors=(1-recAlpha)*rollingErrors+recAlpha*(wrong?1:0);
     const riskExcess=Math.max(0,logistic(state)-threshold);
-    const exposure=(!finalStop?riskExcess:0)*(1+decisionDelay*.18);
-    const authorityExposure=1+.10*K;
-    const decisionLoss=(finalStop&&!shouldStop?scenario.false_stop_cost:0)+(!finalStop&&shouldStop?scenario.fraud_cost:0);
-    const delayLoss=(!finalStop?decisionDelay*.045*(.4+riskExcess):decisionDelay*.012);
-    let loss=(decisionLoss+exposure+delayLoss)*authorityExposure*scenario.loss_multiplier;
-    if(needsReview) loss+=Number(config.review_cost||.015);
+    const lossCal=config.empirical?.loss||{};
+    const cFP=Number(lossCal.c_fp??.0592)*Number(scenario.c_fp_multiplier??1), cFN=Number(lossCal.c_fn??.0832)*Number(scenario.c_fn_multiplier??1), T=Number(lossCal.horizon??horizon);
+    // FP = 정지 오판(정상지급 차단), FN = 정지 누락(부정지급·유출).
+    // 비용은 n=81 위기 패널의 실패/비실패 집단 평균 peak_outflow로 보정한다.
+    const decisionLoss=(finalStop&&!shouldStop?cFP:0)+(!finalStop&&shouldStop?cFN:0);
+    const exposure=(!finalStop?cFN*riskExcess*(1+decisionDelay/Math.max(1,T)):0);
+    const delayLoss=(decisionDelay/Math.max(1,T))*(finalStop?cFP:cFN);
+    let loss=(decisionLoss+exposure+delayLoss)*Number(scenario.loss_multiplier||1);
+    if(needsReview) loss+=Number(lossCal.review_cost??cFP/Math.max(1,T));
     totalLoss+=loss; rtSum+=decisionDelay; decisions++;
-    // Recovery: if rolling error or current exposure crosses the configured margin, temporarily reduce delegation.
+    // Recovery: error EWMA(recAlpha)는 설계 파라미터이며, 비용 스케일만 n=81 패널에서 보정한다.
     if((rollingErrors>Number(c.adjust_m)||exposure>Number(c.recovery_w)) && safeMode===0){
-      safeMode=Math.max(1,Math.round(2+3*c.recovery_w)); adjustmentN++; totalLoss+=Number(config.adjustment_cost||.06);
+      safeMode=Math.max(1,Math.round(2+3*c.recovery_w)); adjustmentN++; totalLoss+=Number(lossCal.adjustment_cost??cFN/Math.max(1,T));
     }
     if(safeMode>0) safeMode--;
   }
   const episodeLoss=totalLoss/Math.max(1,horizon);
-  return {episodeLoss,lossExceeded:episodeLoss>constraints.loss_max,fp,fn,decisions,reviewN,recoveryTime:rtSum/Math.max(1,decisions),adjustmentN,objective:episodeLoss+Number(config.review_weight||.12)*(reviewN/Math.max(1,decisions))+Number(config.delay_weight||.03)*(rtSum/Math.max(1,decisions))+Number(config.adjustment_weight||.02)*adjustmentN};
+  const recoveryTime=rtSum/Math.max(1,decisions), burden=reviewN/Math.max(1,decisions), norm=Math.max(EPS,Number(config.empirical?.loss?.normalization??constraints.loss_max??1));
+  // 목적함수는 임의 가중치를 제거하고 각 항을 경험적 손실 스케일과 T로 무차원화한다.
+  const objective=episodeLoss/norm + burden + recoveryTime/Math.max(1,horizon) + adjustmentN/Math.max(1,horizon);
+  return {episodeLoss,lossExceeded:episodeLoss>constraints.loss_max,fp,fn,decisions,reviewN,recoveryTime,adjustmentN,objective};
 }
 function emptyAgg(){ return {episodes:0,lossExceed:0,fp:0,fn:0,decisions:0,reviewN:0,rtSum:0,rtSq:0,lossSum:0,lossSq:0,objSum:0,objSq:0,adjustments:0,scenarios:{}}; }
 function addEpisode(a,e,key){
@@ -152,8 +173,11 @@ function mergeAgg(target,src){
   for(const [k,v] of Object.entries(src.scenarios||{})){ const s=target.scenarios[k]??={n:0,objSum:0,lossSum:0,violations:0}; for(const f of ['n','objSum','lossSum','violations']) s[f]+=Number(v[f]||0); }
   return target;
 }
-function finalizeAgg(a,constraints,confidence=.95){
-  const z=confidence>=.99?2.576:confidence>=.95?1.96:1.645;
+function finalizeAgg(a,constraints,confidence=.95,inference={}){
+  const nominalZ=confidence>=.99?2.576:confidence>=.95?1.96:1.645;
+  const method=inference.method||'none',familySize=Math.max(1,Number(inference.familySize||1)),constraintCount=Object.keys(PROB_CONSTRAINTS).length+Object.keys(MEAN_CONSTRAINTS).length;
+  const alpha=1-confidence,tests=Math.max(1,familySize*constraintCount),adjust=method==='bonferroni'&&inference.adjust===true;
+  const z=adjust?normInv(1-alpha/(2*tests)):nominalZ;
   const nE=Math.max(1,a.episodes), nD=Math.max(1,a.decisions);
   const metrics={
     n:a.episodes,decisions:a.decisions,loss_mean:a.lossSum/nE,loss_exceed_rate:a.lossExceed/nE,
@@ -172,12 +196,12 @@ function finalizeAgg(a,constraints,confidence=.95){
   const normalizedDistances=evals.map(x=>Math.abs(x.mean-x.limit)/Math.max(.01,Math.abs(x.limit)));
   const boundaryScore=1/(.05+Math.min(...normalizedDistances));
   const scenario_scores=Object.fromEntries(Object.entries(a.scenarios).map(([k,v])=>[k,{n:v.n,objective:v.objSum/Math.max(1,v.n),loss_mean:v.lossSum/Math.max(1,v.n),loss_exceed_rate:v.violations/Math.max(1,v.n)}]));
-  return {metrics,ci,classification,boundary_score:boundaryScore,constraints:evals,scenario_scores,raw:a};
+  return {metrics,ci,classification,boundary_score:boundaryScore,constraints:evals,scenario_scores,inference:{method:adjust?'bonferroni':'nominal',nominal_confidence:confidence,family_size:familySize,constraint_count:constraintCount,simultaneous_tests:adjust?tests:constraintCount,z_critical:z},raw:a};
 }
 function deterministicSeed(projectId,candidateId,phase,cycle){ return hashString(`${projectId}|${candidateId}|${phase}|${cycle}|DCV-CDRS-v2`)&0x7fffffff; }
 function configFrom(def,env,cal){
   const b=def.content.benchmark||{}, v=def.content.validation||{};
-  return {horizon:Number(b.horizon||cal.params.horizon_days?.value||90),risk_threshold:Number(b.risk_threshold||cal.params.stability_theta_korea?.value||.62),review_cost:Number(b.review_cost||.015),adjustment_cost:Number(b.adjustment_cost||.06),review_weight:Number(b.review_weight||.12),delay_weight:Number(b.delay_weight||.03),adjustment_weight:Number(b.adjustment_weight||.02),k2_confidence:Number(b.k2_confidence||.84),k3_confidence:Number(b.k3_confidence||.67),max_refinement:Number(v.max_refinement||3),max_confirmation:Number(v.max_confirmation||2),confidence:Number(def.content.constraints?.confidence||.95),exploration_n:Number(v.exploration_n||env.SIM_BATCH_SIZE||180),refinement_n:Number(v.refinement_n||env.SIM_BATCH_SIZE||240),confirmation_n:Number(v.confirmation_n||Math.max(300,Number(env.SIM_BATCH_SIZE||180))),robust_n:Number(v.robust_n||Math.max(300,Number(env.SIM_BATCH_SIZE||180))),empirical:cal};
+  return {horizon:Number(b.horizon||cal.params.horizon_days?.value||90),risk_threshold:Number(b.risk_threshold||cal.params.stability_theta_korea?.value||.62),recovery_alpha:Number(b.recovery_alpha??.18),k2_confidence:Number(b.k2_confidence||.84),k3_confidence:Number(b.k3_confidence||.67),max_refinement:Number(v.max_refinement||3),max_confirmation:Number(v.max_confirmation||2),confidence:Number(def.content.constraints?.confidence||.95),familywise_confidence:Number(v.familywise_confidence||def.content.constraints?.confidence||.95),multiplicity_method:v.multiplicity_method||'bonferroni',family_size:Number(def.content.design?.max_candidates||128),exploration_n:Number(v.exploration_n||env.SIM_BATCH_SIZE||180),refinement_n:Number(v.refinement_n||env.SIM_BATCH_SIZE||240),confirmation_n:Number(v.confirmation_n||Math.max(300,Number(env.SIM_BATCH_SIZE||180))),robust_n:Number(v.robust_n||Math.max(300,Number(env.SIM_BATCH_SIZE||180))),empirical:cal};
 }
 function designDims(d){
   const dims=['sigma','tau','alpha','K','d','W','m'].map(k=>({k,vals:(d[k]&&d[k].length?d[k]:[0]).map(Number)}));
@@ -208,7 +232,7 @@ export function sampleDesign(d,max,seed){
   return chosen;
 }
 export async function seedCandidates(env,projectId){
-  const existing=await one(env.DB,`SELECT COUNT(*) n FROM design_candidates WHERE project_id=?`,[projectId]); if(Number(existing?.n||0)>0)return{created:0};
+  const existing=await one(env.DB,`SELECT COUNT(*) n FROM design_candidates WHERE project_id=?`,[projectId]); if(Number(existing?.n||0)>0){await ensureFrozenProtocol(env,projectId);return{created:0};}
   const def=await latestDefinition(env,projectId); if(!def)throw new Error('definition_missing'); const d={...(def.content.design||{})};
   const mr=await one(env.DB,`SELECT metrics_json FROM measurements WHERE project_id=? ORDER BY measured_at DESC LIMIT 1`,[projectId]);
   const mm=safeJson(mr?.metrics_json,{}),op=mm.operational||{},observedSigma=Number(mm?.pooled?.empirical_sigma);
@@ -219,6 +243,7 @@ export async function seedCandidates(env,projectId){
   const combos=sampleDesign(d,Number(d.max_candidates||128),hashString(`${projectId}:design`)); const now=nowIso(); const candIds=combos.map(()=>uid('cand'));
   const stmts=combos.map((x,i)=>env.DB.prepare(`INSERT INTO design_candidates(id,project_id,sigma,tau,alpha,authority_k,delay_d,recovery_w,adjust_m,status,estimator,evidence_status,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,'pending',?,'pending',?,?)`).bind(candIds[i],projectId,x.sigma,x.tau,x.alpha,x.K,x.d,x.W,x.m,x.estimator,now,now));
   if(stmts.length)await env.DB.batch(stmts);
+  await ensureFrozenProtocol(env,projectId);
   await enqueueMany(env,projectId,'compute_candidate',candIds.map(id=>({candidate_id:id,phase:'exploration',cycle:0})),40);
   await audit(env,projectId,'agent','cdrs.seed','project',projectId,{created:stmts.length,method:'maximin',estimators:d.estimators||ESTIMATORS,empirical_grid:{sigma:d.sigma,tau:d.tau,d:d.d},source:{sigma:Number.isFinite(observedSigma)&&Number(mm.numeric_observations||0)>=30?'external_observations':'paper/default',tau:Number.isFinite(Number(op.data_latency_days))?'operational_logs':'design',approval_delay:Number.isFinite(Number(op.approval_delay_days))?'operational_logs':'design'}}); return{created:stmts.length};
 }
@@ -232,7 +257,9 @@ async function loadScenarios(env,projectId,phase,cal){
   }
   if(phase==='stress'){
     const rows=await all(env.DB,`SELECT * FROM scenarios WHERE project_id=? AND scenario_type='adversarial' ORDER BY name`,[projectId]);
-    return rows.length?{scenarios:rows.map(r=>scenarioFromRow(r,cal)),source:'user_adversarial_scenarios',empirical_ready:true,episode_n:rows.length}:{scenarios:paperStressScenarios(cal),source:'paper_wide_40pct_grid',empirical_ready:true,episode_n:27};
+    if(rows.length)return {scenarios:rows.map(r=>scenarioFromRow(r,cal)),source:'user_adversarial_scenarios',empirical_ready:true,episode_n:rows.length};
+    const base=paperStressScenarios(cal),boot=calibrationUncertaintyScenarios(cal),loss=lossProxyScenarios(cal),scenarios=[...base,...boot,...loss];
+    return {scenarios,source:'paper_wide_40pct_grid+calibration_uncertainty+loss_proxy_sensitivity',empirical_ready:true,episode_n:scenarios.length};
   }
   return {scenarios:syntheticScenarios(cal),source:'published_summary_anchor',empirical_ready:false,episode_n:0};
 }
@@ -244,13 +271,15 @@ async function priorAggregate(env,candidateId,phase){
 }
 function nForPhase(config,phase){ if(phase==='exploration')return config.exploration_n;if(phase==='refinement')return config.refinement_n;if(phase==='confirmation')return config.confirmation_n;return config.robust_n; }
 export async function computeCandidate(env,projectId,candidateId,phase='exploration',cycle=0){
+  await assertProtocolIntegrity(env,projectId);
   const c=await one(env.DB,`SELECT * FROM design_candidates WHERE id=? AND project_id=?`,[candidateId,projectId]);if(!c)throw new Error('candidate_not_found');
   const def=await latestDefinition(env,projectId);if(!def)throw new Error('definition_missing');const constraints=def.content.constraints,cal=await loadEmpiricalCalibration(env,projectId),config=configFrom(def,env,cal);
   let reviewer=null;if(phase==='recompute'){const rm=await one(env.DB,`SELECT model_json FROM reviewer_models WHERE project_id=? ORDER BY version DESC LIMIT 1`,[projectId]);reviewer=rm?safeJson(rm.model_json,{}):null;}
   const scenarioPack=await loadScenarios(env,projectId,phase==='recompute'?'confirmation':phase,cal),scenarios=scenarioPack.scenarios; const seed=deterministicSeed(projectId,candidateId,phase,cycle),rng=mulberry32(seed),n=nForPhase(config,phase);
   const batch=emptyAgg(); for(let i=0;i<n;i++){const sc=scenarios[i%scenarios.length];addEpisode(batch,simulateEpisode(c,constraints,rng,sc,reviewer,config),sc.key);}
   let combined=batch; if(['refinement','confirmation'].includes(phase)){const prior=await priorAggregate(env,candidateId,phase);combined=mergeAgg(prior,batch);}
-  const ev=finalizeAgg(combined,constraints,config.confidence); const m=ev.metrics,id=uid('sim');
+  const confirmatory=['confirmation','historical','stress','recompute'].includes(phase);
+  const ev=finalizeAgg(combined,constraints,confirmatory?config.familywise_confidence:config.confidence,{method:config.multiplicity_method,familySize:config.family_size,adjust:confirmatory}); const m=ev.metrics,id=uid('sim');
   await run(env.DB,`INSERT INTO simulation_runs(id,project_id,candidate_id,phase,seed,n,loss_mean,loss_exceed_rate,fp_rate,fn_rate,review_burden,recovery_time,regret,result_json,created_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,[id,projectId,candidateId,phase,seed,n,m.loss_mean,m.loss_exceed_rate,m.fp_rate,m.fn_rate,m.review_burden,m.recovery_time,null,JSON.stringify({...ev,raw:batch,cycle,estimator:c.estimator,reviewer_used:!!reviewer,scenario_source:scenarioPack.source,empirical_ready:scenarioPack.empirical_ready,empirical_episode_n:scenarioPack.episode_n,empirical_profile:cal.profile.version}),nowIso()]);
   await run(env.DB,`INSERT INTO candidate_evidence(id,project_id,candidate_id,phase,cycle,classification,boundary_score,metrics_json,created_at) VALUES(?,?,?,?,?,?,?,?,?)`,[uid('evidence'),projectId,candidateId,phase,cycle,ev.classification,ev.boundary_score,JSON.stringify(ev),nowIso()]);
   if(['exploration','refinement'].includes(phase)){
@@ -288,4 +317,4 @@ export async function computeRegretTable(env,projectId){
 }
 
 // Pure helpers exposed only for deterministic unit tests; production orchestration uses the exported CDRS functions above.
-export const __test = { finalizeAgg, emptyAgg, mergeAgg, estimatorStep, empiricalChannel };
+export const __test = { finalizeAgg, emptyAgg, mergeAgg, estimatorStep, empiricalChannel, calibrationUncertaintyScenarios, lossProxyScenarios };

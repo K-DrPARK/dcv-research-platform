@@ -1,3 +1,7 @@
+# DCV Research Platform v0.5.0
+
+> Defense Rigor release: frozen protocol, simultaneous inference, calibration uncertainty propagation, participant-cluster human validation, and human scientific sign-off.
+
 # DCV Research Platform v0.2
 
 **Define → Measure → Compute → Validate → Recompute → Approve** 전 과정을 Cloudflare에서 자동 실행하는 박사논문 연구 플랫폼입니다.
@@ -110,7 +114,7 @@ max_regret(x) = max_s regret(x,s)
 
 ## 중요한 연구상 주의
 
-현재 구조적 simulation model은 **논문 방법론을 실행할 수 있는 연구 엔진**입니다. 실제 학위논문의 실증 결과로 확정하기 전에는 81개 위기 사례의 scenario parameterization, 실제 지급결제 손실함수, 한도값과 검토비용을 자료/전문가 근거로 calibration 해야 합니다. 플랫폼은 이 값을 기록하고 재현하는 역할을 수행합니다.
+현재 구조적 simulation model은 **81개 위기 사례 패널로 실증 보정된 연구 엔진**입니다. FP(정지 오판)·FN(정지 누락)의 비용 proxy는 실패/비실패 집단의 peak_outflow로 보정되며, 검토·재조정 비용도 동일 손실 단위로 스케일링됩니다. 다만 이는 실제 국고금 지급정지의 회계적 손실을 직접 관측한 값이 아니라 역사적 위기자료를 이용한 경험적 proxy이므로, 제3편의 실제 지급결제 사례에서 추가 외적 보정이 필요합니다.
 
 ## Empirical calibration (v0.3)
 
@@ -142,5 +146,5 @@ This distinction is critical for the dissertation: `K`, `W`, `m` remain design v
 
 
 
-## 보고서의 연구모형 절 (v0.4.2)
+## 보고서의 연구모형 절 (v0.4.3)
 보고서 **1절**에 박사논문 전체 연구모형(연구대상·연구질문·연구설계·명제·변수·계산 산식·그림 M1~M3)이 자동 포함됩니다. 구현은 `public/model.js`(내용), `public/mathtext.js`(수식 파서), `public/figures.js`(그림 M1~M3)입니다. 수식은 Markdown에서 `$$ \\sigma\\le c_{j} $$ (n)` 형태로 쓰며 HTML·Word에서 모두 렌더링됩니다. 기존에 생성해 둔 보고서는 열 때 자동으로 이 절이 추가되고, 새로 생성하려면 "AI 요약 재생성"을 누르세요.

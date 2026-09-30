@@ -33,7 +33,7 @@ T('연구모형 절: 연구대상·연구모형·연구질문·산식·그림이
   const { buildThesisData } = await import('../src/lib/thesis.js'), { env, pid } = await setup(), t = await buildThesisData(env, pid);
   const figs = buildFigures(t), L = buildModelSection(t, { figLine: n => { const g = figs.find(x => x.n === n); return g ? `![그림 ${g.label}. ${g.title}](figures/${g.file}.png)` : ''; } }), md = L.join('\n');
   for (const k of ['1.1 연구대상', '1.2 연구모형', '1.3 연구질문', '1.4 연구설계', '1.5 연구명제', '1.6 변수와 설계벡터', '1.7 계산 산식', 'RQ1', 'RQ2', 'RQ3', 'P1.', 'P2.', 'P3.', 'P4.', MODEL_MARKER]) assert.ok(md.includes(k), k);
-  for (const k of ['그림 M1.', '그림 M2.', '그림 M3.', '**표 M1.', '**표 M6.']) assert.ok(md.includes(k), k);
+  for (const k of ['그림 M0.', '그림 M1.', '그림 M2.', '그림 M3.', '**표 M1.', '**표 M6.']) assert.ok(md.includes(k), k);
   const tags = [...md.matchAll(/^\$\$ .+ \$\$ \((\d+)([a-z]?)\)$/gm)].map(m => [Number(m[1]), m[2]]);
   assert.ok(tags.length >= 35, `수식 ${tags.length}개`);
   const nums = [...new Set(tags.map(x => x[0]))]; assert.deepEqual(nums, nums.map((_, i) => i + 1), '수식 번호는 1부터 빠짐없이 증가');

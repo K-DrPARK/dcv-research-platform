@@ -2,6 +2,7 @@ import { all, one } from './db.js';
 import { safeJson, hashString, APP_VERSION, nowIso } from './util.js';
 import { wilson } from './stats.js';
 import { empiricalReadiness, loadEmpiricalCalibration } from './empirical.js';
+import { latestProtocol } from './rigor.js';
 
 const CLASS_SQL = `CASE
   WHEN c.status='confirmed_feasible' OR EXISTS(SELECT 1 FROM validations v WHERE v.candidate_id=c.id AND v.validation_type='human_recompute' AND v.status='CONFIRM') THEN 'confirmed'
@@ -29,6 +30,7 @@ export async function buildThesisData(env, projectId) {
   const meas = await one(env.DB, `SELECT metrics_json,quality_json,measured_at FROM measurements WHERE project_id=? ORDER BY measured_at DESC LIMIT 1`, [projectId]);
   const appr = await one(env.DB, `SELECT * FROM approvals WHERE project_id=? ORDER BY created_at DESC LIMIT 1`, [projectId]);
   const rmodel = await one(env.DB, `SELECT model_json,version,created_at FROM reviewer_models WHERE project_id=? ORDER BY version DESC LIMIT 1`, [projectId]);
+  const protocol = await latestProtocol(env, projectId);
 
   const candRows = await all(env.DB, `SELECT c.*, ${CLASS_SQL} AS klass FROM design_candidates c WHERE c.project_id=?`, [projectId]);
   const cands = candRows.map(c => ({ id: c.id, sigma: r4(c.sigma), tau: c.tau, alpha: r4(c.alpha), K: c.authority_k, d: c.delay_d, W: r4(c.recovery_w), m: r4(c.adjust_m), estimator: c.estimator || 'ema', status: c.status, evidence_status: c.evidence_status, klass: c.klass, boundary_score: r4(c.boundary_score), max_regret: r4(c.max_regret), objective_score: r4(c.objective_score) }));
@@ -60,6 +62,8 @@ export async function buildThesisData(env, projectId) {
   const selectedId = appr?.candidate_id || null;
   const selected = selectedId ? cands.find(c => c.id === selectedId) || null : null;
   const selectedByPhase = selectedId ? Object.fromEntries(['exploration', 'refinement', 'confirmation', 'historical', 'stress'].map(ph => { const r = byCandPhase.get(`${selectedId}|${ph}`); return [ph, r ? { n: r.n, loss_mean: r4(r.loss_mean), loss_exceed_rate: r4(r.loss_exceed_rate), fp_rate: r4(r.fp_rate), fn_rate: r4(r.fn_rate), review_burden: r4(r.review_burden), recovery_time: r4(r.recovery_time), regret: r4(r.regret) } : null]; }).filter(([, v]) => v)) : {};
+  const selectedEvidence = selectedId ? await one(env.DB, `SELECT result_json FROM simulation_runs WHERE project_id=? AND candidate_id=? AND phase IN ('confirmation','historical','stress') ORDER BY CASE phase WHEN 'stress' THEN 3 WHEN 'historical' THEN 2 ELSE 1 END DESC, created_at DESC LIMIT 1`, [projectId,selectedId]) : null;
+  const selectedInference = safeJson(selectedEvidence?.result_json,{}).inference || null;
 
   const phases = await all(env.DB, `SELECT phase, COUNT(*) runs, SUM(n) episodes, SUM(COALESCE(json_extract(result_json,'$.decisions'),0)) decisions FROM simulation_runs WHERE project_id=? GROUP BY phase ORDER BY phase`, [projectId]);
   const validations = await all(env.DB, `SELECT validation_type, status, COUNT(*) n FROM validations WHERE project_id=? GROUP BY validation_type, status ORDER BY validation_type, status`, [projectId]);
@@ -80,7 +84,7 @@ export async function buildThesisData(env, projectId) {
   const reviewer = {
     n: N('n'), participants: N('participants'),
     arr: ci(N('appropriate'), N('n')), false_accept: ci(N('wrong_accept'), N('wrong_n')), correct_override: ci(N('wrong_n') - N('wrong_accept'), N('wrong_n')), unnecessary_override: ci(N('right_override'), N('right_n')),
-    mean_rt_ms: r4(rvTot?.mean_rt), by_confidence: byConfidence, model: safeJson(rmodel?.model_json, null), model_version: rmodel?.version ?? null
+    mean_rt_ms: r4(rvTot?.mean_rt), by_confidence: byConfidence, model: safeJson(rmodel?.model_json, null), model_version: rmodel?.version ?? null, cluster_bootstrap: safeJson(rmodel?.model_json, null)?.cluster_bootstrap || null
   };
 
   // 실증 패널
@@ -104,10 +108,10 @@ export async function buildThesisData(env, projectId) {
     definition: { version: def?.version ?? null, research_question: content.research_question || cfg.research_question || '', content, gate: safeJson(def?.gate_json, {}) },
     constraints, design, measurement: { metrics: safeJson(meas?.metrics_json, {}), quality: safeJson(meas?.quality_json, {}), measured_at: meas?.measured_at || null },
     candidates: { total: cands.length, by_class: byClass, list: cands, dims, cells, estimators, finalists },
-    selected: selected ? { ...selected, by_phase: selectedByPhase } : null,
+    selected: selected ? { ...selected, by_phase: selectedByPhase, inference:selectedInference } : null,
     approval: appr ? { decision: appr.decision, evidence_level: appr.evidence_level, automatic: !!appr.automatic, created_at: appr.created_at, basis: safeJson(appr.basis_json, {}) } : null,
-    simulation: { phases, scenarios, validations }, reviewer, empirical: { readiness: empirical.status, complete_rows: empirical.complete_rows, target_rows: empirical.target_rows, profile: cal.profile?.version, coefficients: cal.coeff, parameters: params, panel },
-    reproducibility: { design_seed: hashString(`${projectId}:design`), jobs, audit: { n: audit?.n ?? 0, first_at: audit?.first_at, last_at: audit?.last_at } }
+    simulation: { phases, scenarios, validations }, reviewer, empirical: { readiness: empirical.status, complete_rows: empirical.complete_rows, target_rows: empirical.target_rows, profile: cal.profile?.version, coefficients: cal.coeff, calibration_uncertainty: cal.local_refit?.uncertainty || null, loss_calibration: cal.loss, parameters: params, panel },
+    reproducibility: { design_seed: hashString(`${projectId}:design`), protocol: protocol ? {version:protocol.version,hash:protocol.protocol_hash,frozen_at:protocol.frozen_at,status:protocol.status,definition_version:protocol.definition_version} : null, jobs, audit: { n: audit?.n ?? 0, first_at: audit?.first_at, last_at: audit?.last_at } }
   };
 }
 

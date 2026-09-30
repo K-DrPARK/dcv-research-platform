@@ -5,7 +5,9 @@ import { processJobs, scheduleAll, advanceProject } from './lib/orchestrator.js'
 import { generateReport, upgradeStoredReport } from './lib/report.js';
 import { buildThesisData, exportCsv, EXPORT_NAMES } from './lib/thesis.js';
 import { aiJson } from './lib/ai.js';
-import { empiricalReadiness, ensureEmpiricalProfile, importEmpiricalEpisodes, refitEmpiricalCalibration, loadEmpiricalCalibration } from './lib/empirical.js';
+import { empiricalReadiness, ensureEmpiricalProfile, importEmpiricalEpisodes, refitEmpiricalCalibration, loadEmpiricalCalibration, seedBundledEmpiricalPanel } from './lib/empirical.js';
+import { scientificSignoff } from './lib/approve.js';
+import { latestProtocol } from './lib/rigor.js';
 
 async function bodyJson(request){ try{return await request.json();}catch{return {};} }
 function pathParts(url){ return new URL(url).pathname.split('/').filter(Boolean); }
@@ -22,14 +24,15 @@ async function api(request,env){
   if(url.pathname==='/api/projects' && method==='POST'){
     const b=await bodyJson(request), id=uid('project'), now=nowIso();
     const design=b.design||{sigma:[0.03,0.05,0.10],tau:[0,1,2],alpha:[0.15,0.35,0.55,0.75],K:[0,1,2,3],d:[0,1,2,4],W:[0.05,0.12,0.22],m:[0.08,0.15,0.25],estimators:['ema','kalman','changepoint','adaptive'],max_candidates:128};
-    const constraints=b.constraints||{loss_max:0.28,loss_exceed_max:0.10,fp_max:0.08,fn_max:0.10,review_burden_max:0.70,recovery_time_max:4.0,confidence:0.95};
+    const constraints=b.constraints||{loss_max:0.18,loss_exceed_max:0.10,fp_max:0.08,fn_max:0.10,review_burden_max:0.70,recovery_time_max:4.0,confidence:0.95};
     await env.DB.batch([
       env.DB.prepare(`INSERT INTO projects(id,name,description,status,current_stage,auto_run,auto_approve,created_at,updated_at) VALUES(?,?,?,'draft','define',1,1,?,?)`).bind(id,b.name||'DCV 연구 프로젝트',b.description||'',now,now),
       env.DB.prepare(`INSERT INTO project_config(project_id,research_question,design_json,constraints_json,benchmark_json,validation_json) VALUES(?,?,?,?,?,?)`).bind(id,b.research_question||'잡음과 승인 지연 하에서 알고리즘 위임 가능 영역은 어떻게 변화하는가?',JSON.stringify(design),JSON.stringify(constraints),JSON.stringify(b.benchmark||{}),JSON.stringify(b.validation||{}))
     ]);
     await audit(env,id,'user','project.created','project',id,b);
+    await enqueue(env,id,'seed_empirical_panel',{},5);
     await enqueue(env,id,'define_project',{},10);
-    return json({id,status:'queued'},201);
+    return json({id,status:'queued',empirical_panel:'bundled_n81'},201);
   }
 
   if(parts[0]==='api' && parts[1]==='projects' && parts[2]){
@@ -46,7 +49,8 @@ async function api(request,env){
       const scenarios=await one(env.DB,`SELECT COUNT(*) total,SUM(CASE WHEN scenario_type='historical' THEN 1 ELSE 0 END) historical,SUM(CASE WHEN scenario_type='adversarial' THEN 1 ELSE 0 END) adversarial FROM scenarios WHERE project_id=?`,[projectId]);
       const human=await one(env.DB,`SELECT COUNT(*) n FROM reviewer_observations WHERE project_id=?`,[projectId]);
       const empirical=await empiricalReadiness(env,projectId);
-      return json({project:p,definition:def?{...def,gate:safeJson(def.gate_json,{}),content:safeJson(def.content_json,{}),ai:safeJson(def.ai_note,{})}:null,measurement:meas?{...meas,metrics:safeJson(meas.metrics_json,{}),quality:safeJson(meas.quality_json,{})}:null,candidates:counts,approval:app?{...app,basis:safeJson(app.basis_json,{})}:null,reviewer:reviewer?{...reviewer,model:safeJson(reviewer.model_json,{})}:null,jobs,runs,scenarios,human_reviews:Number(human?.n||0),empirical});
+      const protocol=await latestProtocol(env,projectId);
+      return json({project:p,definition:def?{...def,gate:safeJson(def.gate_json,{}),content:safeJson(def.content_json,{}),ai:safeJson(def.ai_note,{})}:null,measurement:meas?{...meas,metrics:safeJson(meas.metrics_json,{}),quality:safeJson(meas.quality_json,{})}:null,candidates:counts,approval:app?{...app,basis:safeJson(app.basis_json,{})}:null,reviewer:reviewer?{...reviewer,model:safeJson(reviewer.model_json,{})}:null,jobs,runs,scenarios,human_reviews:Number(human?.n||0),empirical,protocol});
     }
     if(parts[3]==='run' && method==='POST'){ const r=await advanceProject(env,projectId); return json({advance:r,transport:env.CDRS_QUEUE?'cloudflare-queue':'d1-fallback'}); }
     if(parts[3]==='sources' && method==='GET'){ return json({sources:await all(env.DB,`SELECT * FROM data_sources WHERE project_id=? ORDER BY created_at DESC`,[projectId])}); }
@@ -79,6 +83,9 @@ async function api(request,env){
     if(parts[3]==='empirical' && parts[4]==='seed' && method==='POST'){
       const profile=await ensureEmpiricalProfile(env,projectId); return json({profile,readiness:await empiricalReadiness(env,projectId)});
     }
+    if(parts[3]==='empirical' && parts[4]==='seed-panel' && method==='POST'){
+      const result=await seedBundledEmpiricalPanel(env,projectId); await enqueue(env,projectId,'measure_project',{},30,2); return json(result,201);
+    }
     if(parts[3]==='empirical' && parts[4]==='episodes' && method==='POST'){
       const b=await bodyJson(request),rows=Array.isArray(b)?b:(b.rows||[]),result=await importEmpiricalEpisodes(env,projectId,rows); await enqueue(env,projectId,'refit_empirical',{},22); await enqueue(env,projectId,'measure_project',{},30,2); return json(result,201);
     }
@@ -88,6 +95,8 @@ async function api(request,env){
     if(parts[3]==='candidates' && method==='GET'){
       const rows=await all(env.DB,`SELECT c.*, (SELECT status FROM validations v WHERE v.candidate_id=c.id AND v.validation_type='human_recompute' ORDER BY created_at DESC LIMIT 1) final_status FROM design_candidates c WHERE project_id=? ORDER BY sigma,authority_k,delay_d LIMIT 500`,[projectId]); return json({candidates:rows});
     }
+    if(parts[3]==='protocol' && method==='GET'){ const p=await latestProtocol(env,projectId); return p?json(p):json({error:'protocol_not_frozen'},404); }
+    if(parts[3]==='scientific-signoff' && method==='POST'){ const b=await bodyJson(request); return json(await scientificSignoff(env,projectId,{reviewer_name:b.reviewer_name||'PI',rationale:b.rationale||''})); }
     if(parts[3]==='report' && method==='GET'){
       let r=await one(env.DB,`SELECT * FROM reports WHERE project_id=? ORDER BY created_at DESC LIMIT 1`,[projectId]); if(r){ try{ r=await upgradeStoredReport(env,projectId,r); }catch(e){ /* 구버전 보고서는 그대로 반환 */ } } return r?json({...r,data:safeJson(r.data_json,{})}):json({error:'report_not_ready'},404);
     }

@@ -16,16 +16,18 @@ const EST = { ema: 'EMA', kalman: 'Kalman', changepoint: 'Change-point', adaptiv
 const estName = e => EST[e] || e;
 
 export function checklist(t) {
-  const items = [], rv = t.reviewer, pn = t.empirical.panel, c = t.candidates;
-  if (rv.n < 50) items.push(`검토자 관측이 ${rv.n}건으로 적습니다. 논문 결과로 인용하려면 사전 표본 설계(예: 참가자당 30회 이상, 참가자 수)를 근거로 표본을 늘리세요.`);
-  if (rv.participants < 5) items.push(`검토자 참가자가 ${rv.participants}명입니다. 개인 특성이 결과에 그대로 반영되므로 다수 참가자 확보와 참가자 간 변동 분석이 필요합니다.`);
-  if (pn.n && pn.estimated / pn.n > 0.5) items.push(`위기 사례 ${pn.n}건 중 estimated 자료가 ${pn.estimated}건(${pct(pn.estimated / pn.n, 0)})입니다. 1차 자료로 재검증하거나 민감도 분석에 명시하세요.`);
+  const items = [], rv = t.reviewer, pn = t.empirical.panel, c = t.candidates, lc=t.empirical.loss_calibration;
+  const minP=Number(t.definition.content?.validation?.min_human_participants||30);
+  if (rv.participants < minP) items.push(`인간실험 참가자가 ${rv.participants}명으로 사전 기준 ${minP}명에 미달합니다. 반복 trial 수가 많아도 참가자 수를 대체하지 못합니다.`);
+  if (!rv.cluster_bootstrap?.B) items.push('반복측정 인간실험의 참가자-군집 bootstrap 불확실성 추정이 아직 없습니다.');
+  if (pn.n && pn.estimated / pn.n > 0.5) items.push(`위기 사례 ${pn.n}건 중 reconstructed 자료가 ${pn.estimated}건(${pct(pn.estimated / pn.n, 0)})입니다. 결과는 이 재구성 규칙에 조건부임을 본문과 표에 유지하십시오.`);
   if (t.empirical.readiness !== 'FULL_EPISODE_PANEL') items.push(`실증 패널이 완전하지 않습니다(${t.empirical.complete_rows}/${t.empirical.target_rows}).`);
   if (!c.by_class.confirmed) items.push('CONFIRMED 후보가 없습니다. 제약조건 또는 설계공간을 재검토해야 합니다.');
-  if (t.approval && t.approval.evidence_level !== 'A') items.push(`Evidence Level이 ${t.approval.evidence_level}입니다. A 등급 조건(검토자 모델 + 전체 실증 패널)을 충족하지 못했습니다.`);
-  if (t.approval?.automatic) items.push('승인이 자동 승인 설정으로 이루어졌습니다. 논문에는 사람의 검토·승인 절차를 별도로 기술하세요.');
-  items.push('시뮬레이션의 손실·지급정지 함수는 일반화된 구조 모델입니다. 학위논문의 실제 손실함수와 81개 사례 기반 보정으로 교체하기 전에는 절차 시연·예비 결과로만 사용하세요.');
-  items.push('AI가 작성한 문장(요약·논의)은 초안입니다. 수치는 표를 기준으로 직접 대조하세요.');
+  if (!t.reproducibility.protocol?.hash) items.push('확증 분석 전에 동결된 연구 프로토콜 해시가 없습니다.');
+  if (lc?.identification_status==='PROXY_ONLY') items.push('FP/FN 비용은 직접 관측된 사회적 비용이 아니라 peak-outflow 기반 경험적 proxy입니다. 직접 비용 추정치로 표현하지 마십시오.');
+  if (t.approval?.decision==='COMPUTATIONALLY_CONFIRMED') items.push('플랫폼의 자동 판정은 계산적 확인(COMPUTATIONALLY_CONFIRMED)입니다. 최종 학술적 승인에는 PI/심사자 수동 sign-off가 필요합니다.');
+  items.push('위임 가능 영역은 명시된 제약·시나리오·설계공간에 조건부인 결과입니다. 인과효과나 보편적 정책 임계값으로 확대 해석하지 마십시오.');
+  items.push('AI가 작성한 문장(요약·논의)은 초안입니다. 수치는 표와 D1 실행기록을 기준으로 직접 대조하십시오.');
   return items;
 }
 
@@ -51,9 +53,9 @@ function fallbackNarrative(t) {
   const discussion = [
     top ? `추정기별로는 ${estName(top.estimator)}의 위임 가능 비율이 ${pct(top.share)}로 가장 높았다(표 6). 다만 후보 수가 추정기마다 제한적이므로 신뢰구간의 폭을 함께 고려해야 한다.` : '',
     `σ와 α의 상호작용은 그림 1과 표 5에 나타난 바와 같이 정보오차가 커질수록 위임 가능 비율이 어떻게 달라지는지를 보여 준다.`,
-    rv.n ? `검토자 모델에서 오수용률(AI 오답을 수용한 비율)은 ${pct(rv.false_accept.p)}, 정정 개입률은 ${pct(rv.correct_override.p)}였다. 인간의 개입이 항상 안전 장치가 되지는 않으며, 이 행동 모수를 시뮬레이션에 다시 투입한 결과가 최종 후보의 선택을 좌우한다.` : '인간 검토자 관측이 없어 인간 행동 보정은 반영되지 않았다.'
+    rv.n ? `검토자 모델에서 AI 오답 수용률은 ${pct(rv.false_accept.p)}, 정정 개입률은 ${pct(rv.correct_override.p)}였다. 인간의 개입이 항상 안전 장치가 되지는 않으며, 이 행동 모수를 시뮬레이션에 다시 투입한 결과가 최종 후보의 선택을 좌우한다.` : '인간 검토자 관측이 없어 인간 행동 보정은 반영되지 않았다.'
   ].filter(Boolean).join(' ');
-  return { abstract, discussion, implications: [decision === 'CONFIRMED_DELEGATION' ? '제시된 제약 하에서 위임이 가능한 설계 영역이 존재함을 보였다.' : '현재 증거만으로는 위임 가능 영역을 확정하기 어렵다.', '설계 변수(σ, α, K, d)를 함께 조정해야 위임 경계를 설명할 수 있다.'], next_steps: ['실제 손실함수와 사례별 모수 보정으로 계산 엔진 교체', '검토자 표본 확대와 참가자 간 이질성 분석', '경계 근처 후보의 반복 시드 검증'] };
+  return { abstract, discussion, implications: [['COMPUTATIONALLY_CONFIRMED','SCIENTIFICALLY_APPROVED'].includes(decision) ? '제시된 제약과 검증 프로토콜 하에서 위임이 가능한 설계 영역이 존재함을 보였다.' : '현재 증거만으로는 위임 가능 영역을 확정하기 어렵다.', '설계 변수(σ, α, K, d)를 함께 조정해야 위임 경계를 설명할 수 있다.'], next_steps: ['실제 손실함수와 사례별 모수 보정으로 계산 엔진 교체', '검토자 표본 확대와 참가자 간 이질성 분석', '경계 근처 후보의 반복 시드 검증'] };
 }
 
 export function buildMarkdown(t, ai, sourceNote) {
@@ -68,7 +70,9 @@ export function buildMarkdown(t, ai, sourceNote) {
   const d = t.design, dimRows = [['σ (정보오차)', d.sigma], ['τ (처리 지연)', d.tau], ['α (정보처리 강도)', d.alpha], ['K (위임 권한)', d.K], ['d (승인 지연)', d.d], ['W (복구규칙)', d.W], ['m (조정)', d.m], ['추정기', (d.estimators || []).map(estName)]].map(([k, v]) => [k, Array.isArray(v) ? v.join(', ') : '-']);
   L.push('### 2.2 설계공간', '', '**표 1. 후보 설계공간**', '', mdTable(['변수', '수준'], dimRows), '', `탐색 후보 수 상한: ${d.max_candidates ?? '-'}. 후보는 설계공간에서 결정적 시드(${t.reproducibility.design_seed})로 추출한 풀에서 maximin(최대 최소거리) 기준으로 선택했다.`, '');
   const cs = t.constraints;
-  L.push('### 2.3 제약조건', '', '**표 2. 위임 가능 판정 제약조건**', '', mdTable(['제약', '값'], [['평균 손실 상한', cs.loss_max], ['손실 초과율 상한', cs.loss_exceed_max], ['오수용(FP) 상한', cs.fp_max], ['미탐(FN) 상한', cs.fn_max], ['검토 부담 상한', cs.review_burden_max], ['복구시간 상한', cs.recovery_time_max], ['신뢰수준', cs.confidence]]), '');
+  L.push('### 2.3 제약조건', '', '**표 2. 위임 가능 판정 제약조건**', '', mdTable(['제약', '값'], [['평균 손실 상한', cs.loss_max], ['손실 초과율 상한', cs.loss_exceed_max], ['정지 오판(FP: 정상지급 차단) 상한', cs.fp_max], ['정지 누락(FN: 부정지급·유출) 상한', cs.fn_max], ['검토 부담 상한', cs.review_burden_max], ['복구시간 상한', cs.recovery_time_max], ['신뢰수준', cs.confidence]]), '');
+  const rp=t.reproducibility.protocol, inf=t.selected?.inference;
+  L.push('### 2.4 확증 분석 프로토콜과 다중비교 통제', '', rp?`확증 계산 시작 전에 연구 프로토콜 v${rp.version}을 동결하였다. SHA-256: \`${rp.hash}\` (동결 ${rp.frozen_at}). 정의·설계공간·제약·통계적 판정규칙이 변경되면 기존 시뮬레이션을 그대로 재사용하지 않는다.`:'동결된 연구 프로토콜이 없습니다.', '', inf?`확증/강건 단계는 ${inf.method} 보정을 사용한다. family size=${inf.family_size}, 동시 검정 수=${inf.simultaneous_tests}, 임계 z=${f(inf.z_critical,3)}로 후보 탐색에 따른 선택 편향을 보수적으로 통제한다.`:'확증 단계의 다중비교 정보가 아직 없습니다.', '');
 
   L.push('## 3. 실증 보정 데이터', '');
   if (pn.n) {
@@ -76,28 +80,41 @@ export function buildMarkdown(t, ai, sourceNote) {
     L.push(`위기 사례 패널은 ${pn.year_min}~${pn.year_max}년 ${pn.n}건이며, 검증(verified) ${pn.verified}건, 추정(estimated) ${pn.estimated}건이다. 파산 사례 비율은 ${cip(pn.failed)}이다.`, '', '**표 3. 위기 사례 패널 기술통계**', '', mdTable(['변수', '평균', '중앙값', '최소', '최대'], [row('peak_outflow', '최대 유출률'), row('concentration', '예금 집중도'), row('digital_adoption', '디지털 이용도'), row('severity', '심각도')]), '', figLine(5));
   } else L.push('사례 패널이 아직 가져와지지 않았습니다.', '');
   if (t.empirical.parameters.length) L.push('**부록 표 A1. 실증 모수**', '', mdTable(['모수', '값', '하한', '상한', '역할', '출처 구분'], t.empirical.parameters.map(p => [p.parameter_key, f(p.value_num, 4), f(p.low_num, 4), f(p.high_num, 4), p.parameter_role, p.provenance_type])), '');
+  const lc=t.empirical.loss_calibration; if(lc?.n) L.push(`### 3.2 ${lc.n}개 사례 기반 손실 proxy 보정`, '', `FP와 FN의 의미는 엔진 기준으로 통일한다. **FP는 정지 오판(정상지급 차단)**, **FN은 정지 누락(부정지급·유출 미차단)**이다. 다만 위기 패널은 실제 지급정지의 사회적·재정적 비용을 관측하지 않으므로 c_FP와 c_FN은 **직접 식별된 비용계수가 아니라 peak outflow로 경험적으로 고정한 proxy**다.`, '', '**표 3A. 경험적 손실함수 보정값**', '', mdTable(['항목','값','보정 근거'], [['패널',`${lc.n}건 (실패 ${lc.failures}, 비실패 ${lc.nonfailures})`,'위기 사례 패널'],['c_FP',f(lc.c_fp,6),`비실패 사례 평균 peak outflow proxy [${f(lc.c_fp_low,4)}, ${f(lc.c_fp_high,4)}]`],['c_FN',f(lc.c_fn,6),`실패 사례 평균 peak outflow proxy [${f(lc.c_fn_low,4)}, ${f(lc.c_fn_high,4)}]`],['q75',f(lc.q75_outflow,6),'peak outflow 75백분위'],['q95',f(lc.q95_outflow,6),'목적함수 손실 정규화 기준'],['검토비용 c_R',f(lc.review_cost,6),'c_FP / T'],['재조정비용 c_A',f(lc.adjustment_cost,6),'c_FN / T']]), '', `보정 상태: **${lc.status}** · 식별 상태: **${lc.identification_status||'-'}** · provenance: ${lc.provenance}. proxy 범위는 강건성 시나리오에서 별도로 변동시키며, 직접 비용 추정으로 해석하지 않는다. 횡단면 81개 사례로 식별할 수 없는 복구 EWMA 계수 등은 설계 파라미터로 유지한다.`, '');
 
+
+  const cu=t.empirical.calibration_uncertainty;
+  if(cu?.B) L.push('### 3.3 보정계수 불확실성 전파', '', `verified/estimated 층을 유지한 ${cu.B}회 bootstrap과 reconstructed episode의 문서화된 측정오차(peak outflow ±0.05, severity ±0.10)를 함께 반영했다. θ₂ bootstrap 5–95% 범위는 ${f(cu.theta2?.p05,4)}–${f(cu.theta2?.p95,4)}, 양(+)의 비율은 ${pct(cu.theta2?.positive_share)}이다. 대표 draw는 stress scenario에 투입해 보정오차가 위임 경계까지 전파되도록 했다.`, '');
   L.push('## 4. 시뮬레이션 결과', '', '### 4.1 실행 개요', '', '**표 4. 단계별 시뮬레이션 실행량**', '', mdTable(['단계', '실행 수', '에피소드 수', '결정 수'], t.simulation.phases.map(p => [p.phase, p.runs, p.episodes, p.decisions])), '');
   L.push('### 4.2 위임 가능 영역', '', `설계 후보 ${c.total}개 중 CONFIRMED ${c.by_class.confirmed || 0}개(${pct(c.total ? (c.by_class.confirmed || 0) / c.total : 0)}), BOUNDARY ${c.by_class.boundary || 0}개, INFEASIBLE ${c.by_class.infeasible || 0}개${c.by_class.provisional ? `, 잠정 ${c.by_class.provisional}개` : ''}로 분류되었다.`, figLine(1));
   const lv = (k, n) => c.dims[k].map(e => [n, e.level, e.total, e.confirmed, cip(e)]);
   L.push('### 4.3 설계 변수별 위임 가능 비율', '', '**표 5. 변수 수준별 CONFIRMED 비율 (95% Wilson 구간)**', '', mdTable(['변수', '수준', '후보 수', 'CONFIRMED', '비율 [95% CI]'], [...lv('sigma', 'σ'), ...lv('tau', 'τ'), ...lv('alpha', 'α'), ...lv('K', 'K'), ...lv('d', 'd'), ...lv('W', 'W'), ...lv('m', 'm')]), '', '> 주의: 수준별 비율은 다른 변수를 통제하지 않은 주변(marginal) 비율이며 인과효과가 아니다.', '');
-  L.push('### 4.4 추정기 비교', '', '**표 6. 추정기별 성능 (후보 평균)**', '', mdTable(['추정기', '후보 수', 'CONFIRMED', '비율 [95% CI]', '평균 손실', 'FP', 'FN', '검토부담', '복구시간'], c.estimators.map(e => [estName(e.estimator), e.total, e.confirmed, cip(e), f(e.loss_mean), f(e.fp_rate), f(e.fn_rate), f(e.review_burden), f(e.recovery_time)])), '', figLine(2));
+  L.push('### 4.4 추정기 비교', '', '**표 6. 추정기별 성능 (후보 평균)**', '', mdTable(['추정기', '후보 수', 'CONFIRMED', '비율 [95% CI]', '평균 손실', 'FP(정지 오판)', 'FN(정지 누락)', '검토부담', '복구시간'], c.estimators.map(e => [estName(e.estimator), e.total, e.confirmed, cip(e), f(e.loss_mean), f(e.fp_rate), f(e.fn_rate), f(e.review_burden), f(e.recovery_time)])), '', figLine(2));
   L.push('### 4.5 최종 후보군과 Minimax Regret', '', c.finalists.length ? `안전 제약을 통과한 후보 중 최대 후회가 가장 작은 상위 ${c.finalists.length}개를 표 7에 제시한다.` : 'CONFIRMED 후보가 없어 순위를 제시할 수 없다.', '');
   if (c.finalists.length) L.push('**표 7. 강건 후보 순위 (Minimax Regret 오름차순)**', '', mdTable(['순위', '추정기', 'σ', 'τ', 'α', 'K', 'd', 'W', 'm', 'Max Regret', 'Boundary'], c.finalists.map((x, i) => [i + 1, estName(x.estimator), x.sigma, x.tau, x.alpha, x.K, x.d, x.W, x.m, f(x.max_regret, 4), f(x.boundary_score)])), '', figLine(3));
-  if (b) { const ph = Object.entries(b.by_phase); if (ph.length) L.push('### 4.6 선택 후보의 단계별 성능', '', '**표 8. 선택 후보 성능 (단계별)**', '', mdTable(['단계', 'n', '평균 손실', '손실 초과율', 'FP', 'FN', '검토부담', '복구시간', 'Regret'], ph.map(([k, v]) => [k, v.n, f(v.loss_mean, 4), f(v.loss_exceed_rate, 4), f(v.fp_rate, 4), f(v.fn_rate, 4), f(v.review_burden, 3), f(v.recovery_time, 3), f(v.regret, 4)])), ''); }
+  if (b) { const ph = Object.entries(b.by_phase); if (ph.length) L.push('### 4.6 선택 후보의 단계별 성능', '', '**표 8. 선택 후보 성능 (단계별)**', '', mdTable(['단계', 'n', '평균 손실', '손실 초과율', 'FP(정지 오판)', 'FN(정지 누락)', '검토부담', '복구시간', 'Regret'], ph.map(([k, v]) => [k, v.n, f(v.loss_mean, 4), f(v.loss_exceed_rate, 4), f(v.fp_rate, 4), f(v.fn_rate, 4), f(v.review_burden, 3), f(v.recovery_time, 3), f(v.regret, 4)])), ''); }
 
   L.push('## 5. 강건성 검증', '', `시나리오 ${t.simulation.scenarios?.total ?? 0}개(역사적 ${t.simulation.scenarios?.historical ?? 0}, 적대적 ${t.simulation.scenarios?.adversarial ?? 0}) 하에서 후보를 재검증했다.`, '', '**표 9. 검증 결과 집계**', '', mdTable(['검증 유형', '판정', '건수'], t.simulation.validations.map(v => [v.validation_type, v.status, v.n])), '');
 
   L.push('## 6. 인간 검토자 보정', '');
   if (rv.n) {
-    L.push(`검토자 관측 ${rv.n}건(참가자 ${rv.participants}명), 평균 응답시간 ${f(rv.mean_rt_ms / 1000, 2)}초.`, '', '**표 10. 인간 검토자 행동 모수 (95% Wilson 구간)**', '', mdTable(['지표', '추정치 [95% CI]'], [['적정 의존율 (ARR)', cip(rv.arr)], ['오수용률 (AI 오답 수용)', cip(rv.false_accept)], ['정정 개입률 (AI 오답 개입)', cip(rv.correct_override)], ['불필요 개입률 (AI 정답 개입)', cip(rv.unnecessary_override)]]), '', '**표 11. AI 신뢰도별 수용률**', '', mdTable(['AI 신뢰도', 'n', '정답 시 수용', '오답 시 수용', '평균 응답시간(ms)'], rv.by_confidence.map(x => [x.confidence, x.n, cip(x.accept_when_correct), cip(x.accept_when_wrong), f(x.mean_rt_ms, 0)])), '', figLine(4));
+    L.push(`검토자 관측 ${rv.n}건(참가자 ${rv.participants}명), 평균 응답시간 ${f(rv.mean_rt_ms / 1000, 2)}초. 반복 trial을 독립 참가자로 간주하지 않고 참가자 단위 cluster bootstrap(${rv.cluster_bootstrap?.B||0}회)을 적용한다.`, '', '**표 10. 인간 검토자 행동 모수 (95% Wilson 구간)**', '', mdTable(['지표', '추정치 [95% CI]'], [['적정 의존율 (ARR)', cip(rv.arr)], ['AI 오답 수용률', cip(rv.false_accept)], ['정정 개입률 (AI 오답 개입)', cip(rv.correct_override)], ['불필요 개입률 (AI 정답 개입)', cip(rv.unnecessary_override)]]), '', '**표 11. AI 신뢰도별 수용률**', '', mdTable(['AI 신뢰도', 'n', '정답 시 수용', '오답 시 수용', '평균 응답시간(ms)'], rv.by_confidence.map(x => [x.confidence, x.n, cip(x.accept_when_correct), cip(x.accept_when_wrong), f(x.mean_rt_ms, 0)])), '', figLine(4));
   } else L.push('검토자 관측이 없습니다.', '');
 
-  L.push('## 7. 최종 판정', '', t.approval ? `- 판정: **${t.approval.decision}** (Evidence Level ${t.approval.evidence_level}, ${t.approval.automatic ? '자동' : '수동'} 승인, ${t.approval.created_at})` : '- 판정: 미확정', b ? `- 선택 후보: 추정기 ${estName(b.estimator)}, σ=${b.sigma}, τ=${b.tau}, α=${b.alpha}, K=${b.K}, d=${b.d}, W=${b.W}, m=${b.m}\n- Minimax Regret ${f(b.max_regret, 4)}, Boundary Score ${f(b.boundary_score)}` : '', t.approval?.basis?.selection_rule ? `- 선택 규칙: ${t.approval.basis.selection_rule}` : '', '');
+  L.push('## 7. 최종 판정', '', t.approval ? `- 판정: **${t.approval.decision}** (Evidence Level ${t.approval.evidence_level}, ${t.approval.automatic ? '계산 자동판정' : '사람의 학술 승인'}, ${t.approval.created_at})` : '- 판정: 미확정', b ? `- 선택 후보: 추정기 ${estName(b.estimator)}, σ=${b.sigma}, τ=${b.tau}, α=${b.alpha}, K=${b.K}, d=${b.d}, W=${b.W}, m=${b.m}\n- Minimax Regret ${f(b.max_regret, 4)}, Boundary Score ${f(b.boundary_score)}` : '', t.approval?.basis?.selection_rule ? `- 선택 규칙: ${t.approval.basis.selection_rule}` : '', '');
 
+
+  L.push('## 7A. 주장 범위(Claim Scope Matrix)', '', mdTable(['주장','상태','해석'], [
+    ['명시된 제약 하 위임 가능 영역 존재','지원 가능','독립 확인·강건 시나리오·다중비교 보정에 조건부'],
+    ['후보 간 상대적 강건성/Minimax Regret','지원 가능','선언된 시나리오 집합 안의 비교 결과'],
+    ['절대적 위기확률 또는 실제 지급손실 예측','지원하지 않음','현재 모형은 외부 확률예측 모형이 아님'],
+    ['FP/FN의 직접 사회적 비용','지원하지 않음','peak-outflow 기반 proxy만 사용'],
+    ['위임의 인과효과','지원하지 않음','관측·시뮬레이션 설계로 인과식별하지 않음'],
+    ['보편적 최적 임계값','지원하지 않음','사례·제약·시나리오에 조건부']
+  ]), '');
   L.push('## 8. 논의', '', ai.discussion, '', '## 9. 한계 및 타당성 위협', '', ...arr(ai.limitations).map(x => `- ${x}`), '', '## 10. 시사점과 후속 연구', '', ...arr(ai.implications).map(x => `- ${x}`), '', '**후속 연구**', '', ...arr(ai.next_steps).map(x => `- ${x}`), '');
 
-  L.push('## 부록 B. 재현성 정보', '', mdTable(['항목', '값'], [['플랫폼 버전', t.app_version], ['프로젝트 ID', t.project.id], ['설계 시드', t.reproducibility.design_seed], ['정의 버전', t.definition.version], ['실증 프로파일', t.empirical.profile], ['검토자 모델 버전', rv.model_version], ['감사 로그', `${t.reproducibility.audit.n}건 (${t.reproducibility.audit.first_at || '-'} ~ ${t.reproducibility.audit.last_at || '-'})`], ['작업 집계', t.reproducibility.jobs.map(j => `${j.type}:${j.status}=${j.n}`).join('; ') || '-']]), '', '---', `요약·논의 생성 방식: ${sourceNote}`, '본 보고서의 표와 그림은 D1에 저장된 실행 기록에서 계산되었습니다. 문장형 요약은 초안이므로 표의 수치와 대조하십시오.', '');
+  L.push('## 부록 B. 재현성 정보', '', mdTable(['항목', '값'], [['플랫폼 버전', t.app_version], ['프로젝트 ID', t.project.id], ['설계 시드', t.reproducibility.design_seed], ['정의 버전', t.definition.version], ['동결 프로토콜 SHA-256', t.reproducibility.protocol?.hash || '-'], ['프로토콜 동결시각', t.reproducibility.protocol?.frozen_at || '-'], ['실증 프로파일', t.empirical.profile], ['검토자 모델 버전', rv.model_version], ['감사 로그', `${t.reproducibility.audit.n}건 (${t.reproducibility.audit.first_at || '-'} ~ ${t.reproducibility.audit.last_at || '-'})`], ['작업 집계', t.reproducibility.jobs.map(j => `${j.type}:${j.status}=${j.n}`).join('; ') || '-']]), '', '---', `요약·논의 생성 방식: ${sourceNote}`, '본 보고서의 표와 그림은 D1에 저장된 실행 기록에서 계산되었습니다. 문장형 요약은 초안이므로 표의 수치와 대조하십시오.', '');
   return L.join('\n');
 }
 
@@ -113,23 +130,29 @@ export async function generateReport(env, projectId) {
   const note = used ? `Workers AI (${ai._ai.model})` : `규칙 기반 (AI 호출 실패: ${ai._ai?.error || '알 수 없음'})`;
   const md = buildMarkdown(t, merged, note), id = uid('report'), p = await one(env.DB, `SELECT name FROM projects WHERE id=?`, [projectId]);
   await run(env.DB, `INSERT INTO reports(id,project_id,kind,title,content_markdown,data_json,created_at) VALUES(?,?,?,?,?,?,?)`, [id, projectId, 'paper_summary', `${p?.name || 'DCV'} 연구결과`, md, JSON.stringify({ ai_meta: ai._ai, narrative: merged, checklist: checklist(t), figures: figureCatalog(t), summary: { decision: t.approval?.decision, candidates: t.candidates.total, confirmed: t.candidates.by_class.confirmed, reviewer_n: t.reviewer.n } }), nowIso()]);
-  await run(env.DB, `UPDATE projects SET current_stage='report',status='complete',updated_at=? WHERE id=?`, [nowIso(), projectId]);
+  const signed=await one(env.DB, `SELECT id FROM approvals WHERE project_id=? AND decision='SCIENTIFICALLY_APPROVED' ORDER BY created_at DESC LIMIT 1`, [projectId]);
+  await run(env.DB, `UPDATE projects SET current_stage=?,status=?,updated_at=? WHERE id=?`, [signed?'complete':'scientific_review',signed?'complete':'report_ready',nowIso(), projectId]);
   await audit(env, projectId, 'agent', 'report.generated', 'report', id, { approval: t.approval?.decision, ai: ai._ai });
   return { id, markdown: md, content_markdown: md, thesis: t, ai };
 }
 
 function rvLimit(t) {
-  const L = [], rv = t.reviewer, pn = t.empirical.panel;
-  L.push(rv.n ? `인간 검토자 관측이 ${rv.n}건(참가자 ${rv.participants}명)으로, 행동 모수의 신뢰구간이 넓고 개인 이질성을 반영하지 못한다.` : '인간 검토자 관측이 없어 인간 행동이 보정되지 않았다.');
-  if (pn.n) L.push(`위기 사례 ${pn.n}건 중 ${pn.estimated}건은 추정값으로, 측정오차가 결과에 전파될 수 있다.`);
-  L.push('후보 수준별 비율은 주변 비율이며 변수 간 상호작용과 인과효과를 식별하지 못한다.');
+  const L = [], rv = t.reviewer, pn = t.empirical.panel, lc=t.empirical.loss_calibration;
+  if(rv.n) L.push(`인간 검토 결과는 ${rv.n}개 trial, ${rv.participants}명 참가자에 기반한다. 반복측정 의존성은 참가자 cluster bootstrap으로 보정하지만 표본의 대표성 문제는 별개로 남는다.`); else L.push('인간 검토자 관측이 없어 인간 행동이 보정되지 않았다.');
+  if (pn.n) L.push(`위기 사례 ${pn.n}건 중 ${pn.estimated}건은 reconstructed 자료로, 계수 정밀도와 외적 타당성은 재구성 규칙에 조건부이다.`);
+  if(lc?.identification_status==='PROXY_ONLY') L.push('FP/FN 손실계수는 직접 관측 비용이 아니라 peak-outflow 기반 proxy이며, proxy 범위 민감도는 검증하지만 경제적 후생비용으로 해석할 수 없다.');
+  L.push('후보 수준별 비율은 주변 비율이며 변수 간 상호작용과 인과효과를 직접 식별하지 못한다.');
+  L.push('절대적 위기확률 예측이 아니라 명시된 제약과 시나리오 집합 하의 상대적 위임경계 및 설계 비교가 검증 목표이다.');
   return L;
 }
 
 // 이전 버전(연구모형 절이 없는)으로 저장된 보고서를 열 때, 저장된 요약·논의 문장은 그대로 두고
 // 현재 D1 집계로 본문을 다시 조립한다(AI 호출 없음). 이미 연구모형 절이 있으면 그대로 돌려준다.
 export async function upgradeStoredReport(env, projectId, row) {
-  if (!row || String(row.content_markdown || '').includes(MODEL_MARKER)) return row;
+  if (!row) return row;
+  const oldMd=String(row.content_markdown||'');
+  const current=oldMd.includes(MODEL_MARKER)&&oldMd.includes('그림 M0.')&&oldMd.includes('주장 범위(Claim Scope Matrix)')&&!/오수용\(FP\)|미탐\(FN\)|기본 0\.45, 1\.4|용어 주의/.test(oldMd);
+  if(current) return row;
   const data = JSON.parse(row.data_json || '{}'), nar = data.narrative;
   if (!nar || !nar.abstract) return row;
   const t = await buildThesisData(env, projectId), note = data.ai_meta?.ok ? `Workers AI (${data.ai_meta.model})` : '규칙 기반 (저장된 요약 재사용)';

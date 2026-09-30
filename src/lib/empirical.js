@@ -1,5 +1,6 @@
 import { all, one, run, audit } from './db.js';
-import { nowIso, uid, clamp, safeJson } from './util.js';
+import { nowIso, uid, clamp, safeJson, mulberry32, quantile as qUtil } from './util.js';
+import { CRISIS_EPISODES } from '../data/crisisEpisodes.js';
 
 // Anchors transcribed from the user-supplied current CBDC paper (n=81 version).
 // This registry deliberately separates directly estimated quantities from literature-bounded,
@@ -94,6 +95,34 @@ const PARAMS = [
   ['w_oper',-0.05,null,null,'weight','welfare','author_specified','Section 3.9']
 ];
 
+function quantile(values,q){
+  const a=values.filter(Number.isFinite).slice().sort((x,y)=>x-y);
+  if(!a.length) return null;
+  const pos=(a.length-1)*q,lo=Math.floor(pos),hi=Math.ceil(pos),w=pos-lo;
+  return a[lo]*(1-w)+a[hi]*w;
+}
+export function deriveLossCalibration(rows,horizon=90){
+  const clean=(rows||[]).filter(r=>Number.isFinite(Number(r.peak_outflow)) && (Number(r.failed)===0 || Number(r.failed)===1));
+  if(!clean.length) return {status:'HOLD',n:0,reason:'no_episode_outcomes'};
+  const all=clean.map(r=>Number(r.peak_outflow)),fail=clean.filter(r=>Number(r.failed)===1).map(r=>Number(r.peak_outflow)),ok=clean.filter(r=>Number(r.failed)===0).map(r=>Number(r.peak_outflow));
+  const avg=a=>a.length?a.reduce((x,y)=>x+y,0)/a.length:null;
+  const mu=avg(all),muFail=avg(fail),muOk=avg(ok),q75=quantile(all,.75),q95=quantile(all,.95),T=Math.max(1,Number(horizon)||90);
+  if(!Number.isFinite(muFail)||!Number.isFinite(muOk)||!Number.isFinite(q95)) return {status:'HOLD',n:clean.length,reason:'outcome_strata_incomplete'};
+  const fpLow=quantile(ok,.50),fpHigh=quantile(ok,.75),fnLow=quantile(fail,.50),fnHigh=quantile(fail,.75);
+  return {
+    status: clean.length>=81?'CONFIRM':'PARTIAL', n:clean.length, failures:fail.length, nonfailures:ok.length, horizon:T,
+    mean_outflow:mu, mean_failed_outflow:muFail, mean_nonfailed_outflow:muOk, q75_outflow:q75, q95_outflow:q95,
+    c_fp:muOk, c_fp_low:fpLow, c_fp_high:fpHigh,
+    c_fn:muFail, c_fn_low:fnLow, c_fn_high:fnHigh,
+    review_cost:muOk/T, adjustment_cost:muFail/T, delay_cost_scale:mu, normalization:q95,
+    provenance: clean.length>=81?'empirical_n81_proxy':'empirical_partial_proxy',
+    identification_status:'PROXY_ONLY',
+    claim_scope:'The crisis panel does not observe the social or fiscal cost of a payment stop decision. c_fp/c_fn are empirically anchored peak-outflow proxies, not directly identified welfare costs.',
+    method:'Outcome-stratified peak-outflow proxy calibration on imported crisis episodes; no fabricated FP/FN labels. Point values use stratum means; median-to-75th-percentile bands are retained for sensitivity analysis.'
+  };
+}
+
+
 export async function ensureEmpiricalProfile(env,projectId){
   let p=await one(env.DB,`SELECT * FROM empirical_profiles WHERE project_id=? ORDER BY created_at DESC LIMIT 1`,[projectId]);
   if(p) return p;
@@ -105,6 +134,14 @@ export async function ensureEmpiricalProfile(env,projectId){
   if(stmts.length) await env.DB.batch(stmts);
   await audit(env,projectId,'agent','empirical.profile.seeded','empirical_profile',id,{version:CBDC_PAPER_PROFILE.version,panel:CBDC_PAPER_PROFILE.panel});
   return one(env.DB,`SELECT * FROM empirical_profiles WHERE id=?`,[id]);
+}
+
+export async function seedBundledEmpiricalPanel(env,projectId){
+  await ensureEmpiricalProfile(env,projectId);
+  const result=await importEmpiricalEpisodes(env,projectId,CRISIS_EPISODES);
+  const refit=await refitEmpiricalCalibration(env,projectId,{promote:true});
+  await audit(env,projectId,'agent','empirical.bundled_panel.seeded','project',projectId,{rows:CRISIS_EPISODES.length,refit});
+  return {rows:CRISIS_EPISODES.length,refit,readiness:await empiricalReadiness(env,projectId)};
 }
 
 export async function empiricalReadiness(env,projectId){
@@ -128,9 +165,14 @@ export async function loadEmpiricalCalibration(env,projectId){
     theta1:Number(local?.coefficients?.theta1 ?? params.theta1_severity?.value ?? 0.0597),
     theta2:Number(local?.coefficients?.theta2 ?? params.theta2_concentration_x_shock?.value ?? 0.2466),
     theta3:Number(params.theta3_digital?.value ?? 0.0394),
-    rmse:Number(local?.rmse ?? params.regression_rmse?.value ?? 0.03)
+    rmse:Number(local?.rmse ?? params.regression_rmse?.value ?? 0.03),
+    r2:Number(local?.r2 ?? params.regression_r2?.value ?? 0.553),
+    theta2_se:Number(local?.theta2_se ?? params.theta2_se?.value ?? 0.0655),
+    theta2_ci:Array.isArray(local?.theta2_ci)?local.theta2_ci:[params.theta2_concentration_x_shock?.low,params.theta2_concentration_x_shock?.high]
   };
-  return {profile,params,coeff,local_refit:local};
+  const episodes=await all(env.DB,`SELECT peak_outflow,failed FROM empirical_episodes WHERE project_id=?`,[projectId]);
+  const loss=deriveLossCalibration(episodes,Number(params.horizon_days?.value??90));
+  return {profile,params,coeff,loss,local_refit:local};
 }
 
 export async function importEmpiricalEpisodes(env,projectId,rows=[]){
@@ -173,9 +215,32 @@ export function fitReducedForm(rows){
   return {status:'CONFIRM',n,coefficients:{kappa:beta[0],theta1:beta[1],theta2},theta2_se:se,theta2_z:z,theta2_ci:[theta2-1.96*se,theta2+1.96*se],rmse,r2};
 }
 
+
+function sampleWithReplacement(rng,rows,n){const out=[];for(let i=0;i<n;i++)out.push(rows[Math.floor(rng()*rows.length)]);return out;}
+export function bootstrapCalibration(rows,{B=60,seed=20260618}={}){
+  const clean=(rows||[]).filter(r=>[r.peak_outflow,r.severity,r.concentration].every(v=>Number.isFinite(Number(v))));
+  if(clean.length<20)return{status:'HOLD',reason:'insufficient_rows',B:0,draws:[]};
+  const verified=clean.filter(r=>r.provenance_type==='verified'),estimated=clean.filter(r=>r.provenance_type!=='verified'),rng=mulberry32(seed),draws=[];
+  for(let b=0;b<B;b++){
+    let boot=[];
+    if(verified.length)boot.push(...sampleWithReplacement(rng,verified,verified.length));
+    if(estimated.length)boot.push(...sampleWithReplacement(rng,estimated,estimated.length));
+    if(!verified.length||!estimated.length)boot=sampleWithReplacement(rng,clean,clean.length);
+    const perturbed=boot.map(r=>{
+      const est=r.provenance_type!=='verified';
+      return {...r,peak_outflow:clamp(Number(r.peak_outflow)+(est?(rng()*2-1)*0.05:0),0,.50),severity:clamp(Number(r.severity)+(est?(rng()*2-1)*0.10:0),0,1)};
+    });
+    const fit=fitReducedForm(perturbed);if(fit.status==='CONFIRM')draws.push({kappa:fit.coefficients.kappa,theta1:fit.coefficients.theta1,theta2:fit.coefficients.theta2,rmse:fit.rmse,r2:fit.r2});
+  }
+  if(!draws.length)return{status:'HOLD',reason:'bootstrap_failed',B:0,draws:[]};
+  const vals=draws.map(x=>x.theta2).sort((a,b)=>a-b),pick=q=>vals[Math.round((vals.length-1)*q)];
+  const reps=[.05,.25,.50,.75,.95].map(q=>{const target=pick(q);return draws.reduce((best,x)=>Math.abs(x.theta2-target)<Math.abs(best.theta2-target)?x:best,draws[0]);});
+  return {status:'CONFIRM',B:draws.length,seed,theta2:{p05:qUtil(vals,.05),p50:qUtil(vals,.50),p95:qUtil(vals,.95),positive_share:vals.filter(x=>x>0).length/vals.length},representative_draws:reps};
+}
+
 export async function refitEmpiricalCalibration(env,projectId,{promote=false}={}){
   const profile=await ensureEmpiricalProfile(env,projectId),rows=await all(env.DB,`SELECT peak_outflow,concentration,severity,digital_adoption,provenance_type FROM empirical_episodes WHERE project_id=?`,[projectId]);
-  const result=fitReducedForm(rows),id=uid('cal');
+  const base=fitReducedForm(rows),uncertainty=bootstrapCalibration(rows,{B:Number(env.CALIBRATION_BOOTSTRAP_N||60),seed:Number(CBDC_PAPER_PROFILE.simulation_architecture.seed||20260618)}),result={...base,uncertainty},id=uid('cal');
   // Promotion requires the full published panel size; this prevents a partial import from silently replacing the paper anchor.
   const canPromote=promote && result.status==='CONFIRM' && result.n>=Number(profile.panel_n||81);
   await run(env.DB,`INSERT INTO calibration_runs(id,project_id,profile_id,run_type,status,n,result_json,promoted,created_at) VALUES(?,?,?,?,?,?,?,?,?)`,[id,projectId,profile.id,'ols_main_effects',result.status,result.n||0,JSON.stringify(result),canPromote?1:0,nowIso()]);
@@ -186,8 +251,8 @@ export async function refitEmpiricalCalibration(env,projectId,{promote=false}={}
 
 export function empiricalScenarioFromEpisode(r,cal){
   const S=clamp(Number(r.severity??cal.params.baseline_shock?.value??0.75),0,1),C=clamp(Number(r.concentration??cal.params.korea_concentration_anchor?.value??0.75),0,1),D=clamp(Number(r.digital_adoption??cal.params.korea_digital_adoption?.value??0.92),0,1);
-  const fitted=clamp(cal.coeff.kappa+cal.coeff.theta1*S+cal.coeff.theta2*C*S+cal.coeff.theta3*D,0,0.75);
-  return {key:String(r.id||`${r.episode_name}:${r.year}`),name:r.episode_name||'historical episode',severity:S,concentration:C,digital:D,empirical_outflow:fitted,observed_outflow:r.peak_outflow==null?null:Number(r.peak_outflow),failed:r.failed==null?null:Number(r.failed),volatility:1,delay_multiplier:1,loss_multiplier:1,drift:0,rho:.82,shift_time:8,shift_magnitude:fitted,fraud_cost:1.4,false_stop_cost:.45,process_noise:Math.max(.015,cal.coeff.rmse),provenance:r.provenance_type||'imported'};
+  const fitted=clamp(cal.coeff.kappa+cal.coeff.theta1*S+cal.coeff.theta2*C*S,0,0.75); // theta3 is intentionally excluded: the paper treats the direct digital effect as statistically inconclusive and not a calibration coefficient.
+  return {key:String(r.id||`${r.episode_name}:${r.year}`),name:r.episode_name||'historical episode',severity:S,concentration:C,digital:D,empirical_outflow:fitted,observed_outflow:r.peak_outflow==null?null:Number(r.peak_outflow),failed:r.failed==null?null:Number(r.failed),volatility:1,delay_multiplier:1,loss_multiplier:1,drift:0,rho:.82,shift_time:8,shift_magnitude:fitted,process_noise:Math.max(.015,cal.coeff.rmse),provenance:r.provenance_type||'imported'};
 }
 
-export const __test={fitReducedForm};
+export const __test={fitReducedForm,deriveLossCalibration,bootstrapCalibration};

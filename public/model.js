@@ -14,15 +14,16 @@ export function buildModelSection(t, { figLine = () => '', estName = e => e, cle
   const params = Object.fromEntries((t.empirical?.parameters || []).map(p => [p.parameter_key, Number(p.value_num)]));
   const P = (k, fb) => Number.isFinite(params[k]) ? params[k] : fb;
   const bm = t.definition?.content?.benchmark || {};
-  const cfg = { T: P('horizon_days', 90), th0: Number(bm.risk_threshold || P('stability_theta_korea', 0.62)), cr: Number(bm.review_cost || 0.015), ca: Number(bm.adjustment_cost || 0.06), wr: Number(bm.review_weight || 0.12), wd: Number(bm.delay_weight || 0.03), wa: Number(bm.adjustment_weight || 0.02), k2: Number(bm.k2_confidence || 0.84), k3: Number(bm.k3_confidence || 0.67), gam: P('outflow_digital_sensitivity', 0.35) };
-  const kap = P('kappa', -0.0683), th1 = P('theta1_severity', 0.0597), th2 = P('theta2_concentration_x_shock', 0.2466), th2se = P('theta2_se', 0.0655), rmse = P('regression_rmse', 0.03), r2 = P('regression_r2', 0.553);
+  const lc = t.empirical?.loss_calibration || {};
+  const cfg = { T: P('horizon_days', 90), th0: Number(bm.risk_threshold || P('stability_theta_korea', 0.62)), k2: Number(bm.k2_confidence || 0.84), k3: Number(bm.k3_confidence || 0.67), gam: P('outflow_digital_sensitivity', 0.35), recAlpha: Number(bm.recovery_alpha ?? 0.18), cFP: Number(lc.c_fp ?? 0.0592), cFN: Number(lc.c_fn ?? 0.0832), cReview: Number(lc.review_cost ?? 0.000658), cAdjust: Number(lc.adjustment_cost ?? 0.000924), cDelay: Number(lc.delay_cost_scale ?? 0.07696), lossNorm: Number(lc.normalization ?? 0.18), lossN: Number(lc.n ?? 0), lossProv: lc.provenance || 'fallback' };
+  const ec=t.empirical?.coefficients||{}, kap=Number(ec.kappa??P('kappa',-0.0683)), th1=Number(ec.theta1??P('theta1_severity',0.0597)), th2=Number(ec.theta2??P('theta2_concentration_x_shock',0.2466)), th2se=Number(ec.theta2_se??P('theta2_se',0.0655)), rmse=Number(ec.rmse??P('regression_rmse',0.03)), r2=Number(ec.r2??P('regression_r2',0.553));
   const ORDER = ['chain', 'p1', 'p2', 'p3', 'p4', 'xvec', 'dyn', 'chan', 'obs', 'ema', 'kalman', 'cp', 'adaptive', 'dec', 'conf', 'rev', 'ovr', 'loss', 'expo', 'delay', 'agg', 'agg2', 'rec', 'obj', 'D', 'wil', 'cls', 'bs', 'seed', 'stress', 'regret', 'mr', 'xstar', 'ols', 'arr', 'hpar', 'recomp'];
   const used = [];
   const n = name => ORDER.indexOf(name) + 1;                       // 식 번호 (본문 속 교차참조와 공용)
   const eq = (name, tex, sfx = '') => { used.push(name); return `$$ ${tex} $$ (${n(name)}${sfx})`; };
   const S = (...x) => L.push(...x);
 
-  S(`## 1. ${MODEL_MARKER}`, '', '> 이 절은 박사논문 전체(제1편 Define · 제2편 Compute · 제3편 Validate)의 연구모형·연구대상·연구질문·계산 산식을 한 곳에 정리한 것이다. 그림·표 번호 앞의 “M”은 연구모형(Model) 절의 자료임을 뜻한다. 이 절의 구조와 산식은 연구설계 문서이고, 이후 절(2~10)의 수치는 이 프로젝트의 실행 결과다.', '');
+  S(`## 1. ${MODEL_MARKER}`, '', '> 이 절은 박사논문 전체(제1편 Define · 제2편 Compute · 제3편 Validate)의 연구모형·연구대상·연구질문·계산 산식을 한 곳에 정리한 것이다. 그림·표 번호 앞의 “M”은 연구모형(Model) 절의 자료임을 뜻한다. 이 절의 구조와 산식은 연구설계 문서이고, 이후 절(2~10)의 수치는 이 프로젝트의 실행 결과다.', figLine(10), '');
 
   /* 1.1 연구대상 */
   S('### 1.1 연구대상', '', '본 연구는 “어떤 알고리즘이 더 정확한가”를 비교하는 연구가 아니다. 연구대상은 **알고리즘에 집행권한을 위임할 수 있는 조건의 경계**, 곧 위임 가능 영역 $\\mathcal D$를 설계·탐색·검증하는 일이다.', '',
@@ -100,7 +101,7 @@ export function buildModelSection(t, { figLine = () => '', estName = e => e, cle
       ['인간', '적절한 의존 / 오류 복구시간', '$ARR$, $ERT$', '결과', `${t.reviewer?.n ? `ARR ${pct(t.reviewer.arr?.p)}` : '관측 없음'}`],
       ['최종', '위임 가능 여부', '$\\text{Feasible}(x)$', '핵심 결과', `CONFIRMED ${c.by_class?.confirmed || 0} / 전체 ${c.total}`]
     ]), '',
-    '> 용어 주의: 이 플랫폼의 계산 엔진에서 FP는 “정지했으나 정지가 필요 없던 결정”(정상지급 차단, False Stop), FN은 “정지가 필요했으나 지급한 결정”(부정지급·유출 미차단, False Payment)이다. 연구모형 문서의 False Payment / False Stop 표기와 기호가 반대로 대응하므로 논문 본문에서는 용어를 하나로 통일해야 한다.', '');
+    '');
 
   /* 1.7 계산 산식 */
   S('### 1.7 계산 산식', '', '아래 식은 계산 엔진(CDRS v2)이 실제로 수행하는 연산을 논문 표기로 옮긴 것이다. 괄호 안 숫자 값은 엔진 기본값이며 프로젝트 설정에서 바뀔 수 있다.', '');
@@ -127,14 +128,14 @@ export function buildModelSection(t, { figLine = () => '', estName = e => e, cle
     `$a_t$는 알고리즘 판단, $s_t$는 실제 정지 필요 여부, $\\Phi_t$는 신뢰도, $r_t$는 인간 검토 여부, $\\hat a_t$는 최종 집행이다. $q_o$(정정 개입률)와 $u$(불필요 개입률)는 기본값이 아니라 인간 검토자 실험에서 추정한 값으로 교체된다(식 ${n('arr')}~${n('hpar')}).`, '');
 
   S('**(라) 손실·복구·목적함수**', '',
-    eq('loss', `\\ell_{t}=\\left[c_{FS}\\,\\mathbb 1_{FP,t}+c_{FR}\\,\\mathbb 1_{FN,t}+e_{t}+h_{t}\\right](1+0.10K)\\,\\omega_{s}+c_{r}\\,r_{t},\\qquad c_{r}=${fmt(cfg.cr)}`),
-    eq('expo', 'e_{t}=\\mathbb 1[\\hat a_{t}=0]\\cdot\\max(0,\\mathrm{logistic}(z_{t})-\\theta_{0})\\,(1+0.18\\,\\Delta_{t})'),
-    eq('delay', 'h_{t}=\\Delta_{t}\\cdot\\left[0.045\\,(0.4+\\text{riskExcess}_{t})\\ \\text{if}\\ \\hat a_{t}=0;\\ \\ 0.012\\ \\text{if}\\ \\hat a_{t}=1\\right]'),
-    eq('agg', 'L=\\sum_{t=1}^{T}\\ell_{t},\\quad T=' + cfg.T + ';\\qquad B=\\frac{\\sum_{t}r_{t}}{N_{dec}},\\qquad T_{R}=\\frac{1}{T}\\sum_{t}\\Delta_{t}'),
-    eq('agg2', '\\widehat{FP}=\\frac{\\sum_{t}\\mathbb 1_{FP,t}}{N_{dec}},\\qquad \\widehat{FN}=\\frac{\\sum_{t}\\mathbb 1_{FN,t}}{N_{dec}}'),
-    eq('rec', '\\rho_{t}^{err}=0.82\\,\\rho_{t-1}^{err}+0.18\\cdot\\mathbb 1[\\hat a_{t}\\ne s_{t}];\\quad \\text{safe mode}\\ \\text{if}\\ \\rho_{t}^{err}>m\\ \\text{or}\\ e_{t}>W,\\ \\ \\text{기간}=\\max(1,\\mathrm{round}(2+3W))'),
-    eq('obj', `J(x,s)=E[L]+w_{r}B+w_{d}T_{R}+w_{a}N_{adj},\\qquad (w_{r},w_{d},w_{a})=(${fmt(cfg.wr)},${fmt(cfg.wd)},${fmt(cfg.wa)})`), '',
-    `$c_{FS}$(정상지급 차단 비용)와 $c_{FR}$(유출 비용)은 시나리오별 값으로 기본 0.45, 1.4이며, $\\Delta_t$는 결정 지연, $\\omega_s$는 손실 배수, $N_{adj}$는 safe mode 전환 횟수(전환당 비용 ${fmt(cfg.ca)})이다. **손실함수의 계수는 일반화된 구조 모형의 값이며 실제 공공 지급결제 손실로 보정되기 전까지 예비 값이다.**`, '');
+    eq('loss', `\\ell_{t}=c_{FP}\\,\\mathbb 1_{FP,t}+c_{FN}\\,\\mathbb 1_{FN,t}+e_{t}+h_{t}+c_{R}r_{t},\\qquad (c_{FP},c_{FN},c_{R})=(${fmt(cfg.cFP)},${fmt(cfg.cFN)},${fmt(cfg.cReview)})`),
+    eq('expo', `e_{t}=c_{FN}\\,\\mathbb 1[\\hat a_{t}=0]\\cdot\\max(0,\\mathrm{logistic}(z_{t})-\\theta_{0})\\left(1+\\frac{\\Delta_{t}}{T}\\right),\\qquad c_{FN}=${fmt(cfg.cFN)}`),
+    eq('delay', `h_{t}=\\frac{\\Delta_{t}}{T}\\left[c_{FN}\\,\\mathbb 1(\\hat a_{t}=0)+c_{FP}\\,\\mathbb 1(\\hat a_{t}=1)\\right],\\qquad T=${cfg.T}`),
+    eq('agg', 'L=\\frac{1}{T}\\sum_{t=1}^{T}\\ell_{t};\\qquad B=\\frac{\\sum_{t}r_{t}}{N_{dec}},\\qquad T_{R}=\\frac{1}{N_{dec}}\\sum_{t}\\Delta_{t}'),
+    eq('agg2', '\\widehat{FP}=\\frac{\\sum_{t}\\mathbb 1[\\hat a_{t}=1,s_{t}=0]}{N_{dec}},\\qquad \\widehat{FN}=\\frac{\\sum_{t}\\mathbb 1[\\hat a_{t}=0,s_{t}=1]}{N_{dec}}'),
+    eq('rec', `\\rho_{t}^{err}=(1-\\lambda_{rec})\\rho_{t-1}^{err}+\\lambda_{rec}\\mathbb 1[\\hat a_{t}\\ne s_{t}],\\quad \\lambda_{rec}=${fmt(cfg.recAlpha)};\\quad \\text{safe mode if }\\rho_{t}^{err}>m\\ \\text{or}\\ e_{t}>W`),
+    eq('obj', `J(x,s)=\\frac{E[L]}{q_{.95}}+B+\\frac{T_{R}}{T}+\\frac{N_{adj}}{T},\\qquad q_{.95}=${fmt(cfg.lossNorm)}`), '',
+    `손실계수는 위기 사례 패널 ${cfg.lossN || '-'}건의 결과층으로 보정한다. $c_{FP}=${fmt(cfg.cFP)}$는 비실패 사례 평균 peak outflow를 이용한 **정지 오판(정상지급 차단)** 비용 proxy, $c_{FN}=${fmt(cfg.cFN)}$는 실패 사례 평균 peak outflow를 이용한 **정지 누락(부정지급·유출 미차단)** 비용 proxy다. 검토비용 $c_R=${fmt(cfg.cReview)}$와 safe-mode 전환비용 $c_A=${fmt(cfg.cAdjust)}$는 각각 $c_{FP}/T$, $c_{FN}/T$로 동일 단위에 맞췄다. 목적함수는 임의 가중치 대신 손실을 패널의 95백분위 $q_{.95}=${fmt(cfg.lossNorm)}$로 정규화하고 검토부담·평균 지연·재조정 빈도를 무차원화해 합산한다. 복구 EWMA의 $\\lambda_{rec}$는 81개 횡단면 패널에서 식별할 수 없으므로 설계 파라미터로 남겨 둔다.`, '');
 
   S('**(마) 제약·위임 가능 영역·판정**', '',
     eq('D', 'g=(L,\\ P(L>L_{max}),\\ FP,\\ FN,\\ B,\\ T_{R}),\\qquad \\mathcal D=\\left\\{x:\\ P\\left[g_{j}(x,S)\\le c_{j}\\right]\\ge1-\\epsilon_{j},\\ \\forall j\\right\\}'),

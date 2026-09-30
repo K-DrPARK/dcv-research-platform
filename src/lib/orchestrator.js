@@ -9,7 +9,7 @@ import { enqueueRecompute, finalizeRecompute } from './recompute.js';
 import { approveProject } from './approve.js';
 import { generateReport } from './report.js';
 import { compareStudy } from './crosscase.js';
-import { refitEmpiricalCalibration } from './empirical.js';
+import { refitEmpiricalCalibration, seedBundledEmpiricalPanel } from './empirical.js';
 
 async function jobExists(env,projectId,type,phase=null){
   const rows=await all(env.DB,`SELECT payload_json,status FROM jobs WHERE project_id=? AND type=? AND status IN ('queued','running')`,[projectId,type]);
@@ -26,7 +26,7 @@ export async function advanceProject(env,projectId){
   const cand=await one(env.DB,`SELECT COUNT(*) total,SUM(CASE WHEN status='confirmed_feasible' THEN 1 ELSE 0 END) feasible,SUM(CASE WHEN status IN ('pending','unresolved','provisionally_feasible') THEN 1 ELSE 0 END) active FROM design_candidates WHERE project_id=?`,[projectId]);
   const total=Number(cand?.total||0), feasible=Number(cand?.feasible||0), active=Number(cand?.active||0);
   if(!total){
-    const inFlight=await one(env.DB,`SELECT COUNT(*) n FROM jobs WHERE project_id=? AND type IN ('define_project','collect_project','refit_empirical','measure_project','seed_candidates') AND status IN ('queued','running')`,[projectId]);
+    const inFlight=await one(env.DB,`SELECT COUNT(*) n FROM jobs WHERE project_id=? AND type IN ('seed_empirical_panel','define_project','collect_project','refit_empirical','measure_project','seed_candidates') AND status IN ('queued','running')`,[projectId]);
     if(Number(inFlight?.n||0)>0){ await setStage(env,projectId,'measure'); return {stage:'waiting',reason:'setup_jobs_in_flight'}; }
     const doneDefine=await one(env.DB,`SELECT COUNT(*) n FROM jobs WHERE project_id=? AND type='define_project' AND status='done'`,[projectId]);
     if(Number(doneDefine?.n||0)>0){ await enqueue(env,projectId,'measure_project',{},30); await setStage(env,projectId,'measure'); return {stage:'measure',resumed:true}; }
@@ -98,6 +98,7 @@ export async function advanceProject(env,projectId){
 async function execute(env,job){
   const payload=JSON.parse(job.payload_json||'{}'); const id=job.project_id;
   switch(job.type){
+    case 'seed_empirical_panel': return seedBundledEmpiricalPanel(env,id);
     case 'define_project': { const r=await defineProject(env,id); if(r.status==='CONFIRM') await enqueue(env,id,'collect_project',{},20); return r; }
     case 'collect_project': { const r=await collectProject(env,id); if(Number(r.empiricalRows||0)>0) await enqueue(env,id,'refit_empirical',{},22); await enqueue(env,id,'measure_project',{},30); return r; }
     case 'measure_project': { const r=await measureProject(env,id); await enqueue(env,id,'seed_candidates',{},35); return r; }

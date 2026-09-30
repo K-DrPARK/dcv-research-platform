@@ -19,7 +19,25 @@ export async function enqueue(env, projectId, type, payload={}, priority=100, de
   return id;
 }
 
+export async function recoverStaleJobs(env, minutes=8) {
+  // A Worker killed by a resource limit never reaches finishJob, leaving the job 'running' forever.
+  const cutoff = new Date(Date.now()-minutes*60000).toISOString();
+  await run(env.DB, `UPDATE jobs SET status=CASE WHEN attempts>=max_attempts THEN 'failed' ELSE 'queued' END, locked_at=NULL, run_after=?, last_error='stale_lock_recovered: worker likely exceeded resource limits', updated_at=? WHERE status='running' AND locked_at IS NOT NULL AND locked_at<?`, [nowIso(), nowIso(), cutoff]);
+}
+
+export async function enqueueMany(env, projectId, type, payloads=[], priority=100) {
+  // One D1 batch + chunked queue sends instead of one round-trip per job (Free plan subrequest limit).
+  if (!payloads.length) return 0;
+  const now = nowIso(), ids = payloads.map(()=>uid('job'));
+  await env.DB.batch(payloads.map((pl,i)=>env.DB.prepare(`INSERT INTO jobs(id,project_id,type,status,priority,payload_json,run_after,created_at,updated_at) VALUES(?,?,?,'queued',?,?,?,?,?)`).bind(ids[i], projectId, type, priority, JSON.stringify(pl), now, now, now)));
+  if (env.CDRS_QUEUE) {
+    try { for (let i=0;i<ids.length;i+=100) await env.CDRS_QUEUE.sendBatch(ids.slice(i,i+100).map(id=>({body:{job_id:id, project_id:projectId, type}}))); } catch (_) {}
+  }
+  return ids.length;
+}
+
 export async function claimJobs(env, limit=4) {
+  await recoverStaleJobs(env);
   const jobs = await all(env.DB, `SELECT * FROM jobs WHERE status='queued' AND run_after<=? ORDER BY priority ASC, created_at ASC LIMIT ?`, [nowIso(), limit]);
   const claimed=[];
   for (const j of jobs) {

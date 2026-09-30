@@ -1,4 +1,4 @@
-import { all, one, run, audit, enqueue } from './db.js';
+import { all, one, run, audit, enqueue, enqueueMany } from './db.js';
 import { latestDefinition } from './define.js';
 import { nowIso, uid, mulberry32, randn, clamp, safeJson, hashString, mean } from './util.js';
 import { wilson } from './stats.js';
@@ -179,18 +179,32 @@ function configFrom(def,env,cal){
   const b=def.content.benchmark||{}, v=def.content.validation||{};
   return {horizon:Number(b.horizon||cal.params.horizon_days?.value||90),risk_threshold:Number(b.risk_threshold||cal.params.stability_theta_korea?.value||.62),review_cost:Number(b.review_cost||.015),adjustment_cost:Number(b.adjustment_cost||.06),review_weight:Number(b.review_weight||.12),delay_weight:Number(b.delay_weight||.03),adjustment_weight:Number(b.adjustment_weight||.02),k2_confidence:Number(b.k2_confidence||.84),k3_confidence:Number(b.k3_confidence||.67),max_refinement:Number(v.max_refinement||3),max_confirmation:Number(v.max_confirmation||2),confidence:Number(def.content.constraints?.confidence||.95),exploration_n:Number(v.exploration_n||env.SIM_BATCH_SIZE||180),refinement_n:Number(v.refinement_n||env.SIM_BATCH_SIZE||240),confirmation_n:Number(v.confirmation_n||Math.max(300,Number(env.SIM_BATCH_SIZE||180))),robust_n:Number(v.robust_n||Math.max(300,Number(env.SIM_BATCH_SIZE||180))),empirical:cal};
 }
-function cartesianDesign(d){
-  const dims=['sigma','tau','alpha','K','d','W','m']; let out=[{}];
-  for(const k of dims){ const vals=(d[k]||[0]).map(Number); out=out.flatMap(o=>vals.map(v=>({...o,[k]:v}))); }
-  const est=(d.estimators||ESTIMATORS).filter(x=>ESTIMATORS.includes(x)); return out.flatMap(o=>est.map(estimator=>({...o,estimator})));
+function designDims(d){
+  const dims=['sigma','tau','alpha','K','d','W','m'].map(k=>({k,vals:(d[k]&&d[k].length?d[k]:[0]).map(Number)}));
+  const est=(d.estimators||ESTIMATORS).filter(x=>ESTIMATORS.includes(x));
+  dims.push({k:'estimator',vals:est.length?est:['ema']});
+  return dims;
 }
-function maximinSample(xs,max,seed){
-  if(xs.length<=max) return xs;
-  const rng=mulberry32(seed), normKeys=['sigma','tau','alpha','K','d','W','m'];
-  const range={}; for(const k of normKeys){const a=xs.map(x=>Number(x[k]));range[k]=[Math.min(...a),Math.max(...a)];}
-  const dist=(a,b)=>Math.sqrt(normKeys.reduce((s,k)=>{const [lo,hi]=range[k],z=(Number(a[k])-Number(b[k]))/Math.max(EPS,hi-lo);return s+z*z;},0)+(a.estimator===b.estimator?0:1));
-  const chosen=[xs[Math.floor(rng()*xs.length)]], used=new Set(chosen.map(x=>JSON.stringify(x)));
-  while(chosen.length<max){ let best=null,bestD=-1; const start=Math.floor(rng()*xs.length); for(let j=0;j<Math.min(xs.length,1200);j++){const x=xs[(start+j)%xs.length],key=JSON.stringify(x);if(used.has(key))continue;const dmin=Math.min(...chosen.map(y=>dist(x,y)));if(dmin>bestD){bestD=dmin;best=x;}} if(!best)break;chosen.push(best);used.add(JSON.stringify(best)); }
+function decodePoint(dims,idx){ const o={}; for(const {k,vals} of dims){ o[k]=vals[idx%vals.length]; idx=Math.floor(idx/vals.length); } return o; }
+// CPU-light maximin: never materialises the full cartesian grid (tens of thousands of points).
+// Draws a deterministic random pool, then greedy farthest-point selection with an incremental min-distance array.
+export function sampleDesign(d,max,seed){
+  const dims=designDims(d); const total=dims.reduce((a,x)=>a*x.vals.length,1);
+  const pool=[], poolMult=2;
+  if(total<=max*poolMult){ for(let i=0;i<total;i++) pool.push(decodePoint(dims,i)); }
+  else{ const rng=mulberry32(seed), seen=new Set(), want=max*poolMult; while(pool.length<want){ const i=Math.floor(rng()*total); if(seen.has(i))continue; seen.add(i); pool.push(decodePoint(dims,i)); } }
+  if(pool.length<=max) return pool;
+  const nk=['sigma','tau','alpha','K','d','W','m'], range={};
+  for(const k of nk){ const vs=dims.find(x=>x.k===k).vals; range[k]=[Math.min(...vs),Math.max(...vs)]; }
+  const D=nk.length, N=pool.length, vec=new Float64Array(N*D), est=new Int8Array(N), ests=dims[7].vals;
+  for(let i=0;i<N;i++){ for(let t=0;t<D;t++){ const k=nk[t]; vec[i*D+t]=(Number(pool[i][k])-range[k][0])/Math.max(EPS,range[k][1]-range[k][0]); } est[i]=ests.indexOf(pool[i].estimator); }
+  const minD=new Float64Array(N).fill(Infinity), taken=new Uint8Array(N), chosen=[]; let cur=0;
+  while(true){
+    taken[cur]=1; chosen.push(pool[cur]); if(chosen.length>=max)break;
+    let best=-1,bi=-1; const co=cur*D;
+    for(let i=0;i<N;i++){ if(taken[i])continue; let s2=est[i]===est[cur]?0:1; const io=i*D; for(let t=0;t<D;t++){const z=vec[io+t]-vec[co+t]; s2+=z*z;} if(s2<minD[i])minD[i]=s2; if(minD[i]>best){best=minD[i];bi=i;} }
+    cur=bi;
+  }
   return chosen;
 }
 export async function seedCandidates(env,projectId){
@@ -202,10 +216,10 @@ export async function seedCandidates(env,projectId){
   if(Number.isFinite(observedSigma)&&observedSigma>0&&Number(mm.numeric_observations||0)>=30)d.sigma=robustGrid(observedSigma,.005,.50,false);
   if(Number.isFinite(Number(op.data_latency_days)))d.tau=robustGrid(Number(op.data_latency_days),0,30,true);
   if(Number.isFinite(Number(op.approval_delay_days)))d.d=robustGrid(Number(op.approval_delay_days),0,30,false);
-  const combos=maximinSample(cartesianDesign(d),Number(d.max_candidates||128),hashString(`${projectId}:design`)); const now=nowIso();
-  const stmts=combos.map(x=>env.DB.prepare(`INSERT INTO design_candidates(id,project_id,sigma,tau,alpha,authority_k,delay_d,recovery_w,adjust_m,status,estimator,evidence_status,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,'pending',?,'pending',?,?)`).bind(uid('cand'),projectId,x.sigma,x.tau,x.alpha,x.K,x.d,x.W,x.m,x.estimator,now,now));
-  if(stmts.length)await env.DB.batch(stmts); const cands=await all(env.DB,`SELECT id FROM design_candidates WHERE project_id=?`,[projectId]);
-  for(const c of cands)await enqueue(env,projectId,'compute_candidate',{candidate_id:c.id,phase:'exploration',cycle:0},40);
+  const combos=sampleDesign(d,Number(d.max_candidates||128),hashString(`${projectId}:design`)); const now=nowIso(); const candIds=combos.map(()=>uid('cand'));
+  const stmts=combos.map((x,i)=>env.DB.prepare(`INSERT INTO design_candidates(id,project_id,sigma,tau,alpha,authority_k,delay_d,recovery_w,adjust_m,status,estimator,evidence_status,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,'pending',?,'pending',?,?)`).bind(candIds[i],projectId,x.sigma,x.tau,x.alpha,x.K,x.d,x.W,x.m,x.estimator,now,now));
+  if(stmts.length)await env.DB.batch(stmts);
+  await enqueueMany(env,projectId,'compute_candidate',candIds.map(id=>({candidate_id:id,phase:'exploration',cycle:0})),40);
   await audit(env,projectId,'agent','cdrs.seed','project',projectId,{created:stmts.length,method:'maximin',estimators:d.estimators||ESTIMATORS,empirical_grid:{sigma:d.sigma,tau:d.tau,d:d.d},source:{sigma:Number.isFinite(observedSigma)&&Number(mm.numeric_observations||0)>=30?'external_observations':'paper/default',tau:Number.isFinite(Number(op.data_latency_days))?'operational_logs':'design',approval_delay:Number.isFinite(Number(op.approval_delay_days))?'operational_logs':'design'}}); return{created:stmts.length};
 }
 async function loadScenarios(env,projectId,phase,cal){

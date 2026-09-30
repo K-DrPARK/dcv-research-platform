@@ -3,6 +3,7 @@ import { aiJson } from './ai.js';
 import { nowIso, uid } from './util.js';
 import { buildThesisData } from './thesis.js';
 import { figureCatalog } from '../../public/figures.js';
+import { buildModelSection, MODEL_MARKER } from '../../public/model.js';
 
 const f = (v, d = 3) => (v == null || v === '' || !Number.isFinite(Number(v))) ? '-' : Number(v).toFixed(d);
 const pct = (v, d = 1) => (v == null || !Number.isFinite(Number(v))) ? '-' : `${(Number(v) * 100).toFixed(d)}%`;
@@ -56,44 +57,45 @@ function fallbackNarrative(t) {
 }
 
 export function buildMarkdown(t, ai, sourceNote) {
-  const c = t.candidates, b = t.selected, rv = t.reviewer, pn = t.empirical.panel, figs = figureCatalog(t), figLine = n => { const g = figs.find(x => x.n === n); return g ? `\n![그림 ${n}. ${g.title}](figures/${g.file}.png)\n\n*그림 ${n}. ${g.title}*\n` : ''; };
+  const c = t.candidates, b = t.selected, rv = t.reviewer, pn = t.empirical.panel, figs = figureCatalog(t), figLine = n => { const g = figs.find(x => x.n === n); return g ? `\n![그림 ${g.label || n}. ${g.title}](figures/${g.file}.png)\n\n*그림 ${g.label || n}. ${g.title}*\n` : ''; };
   const L = [];
   L.push(`# ${cleanTex(t.project.name)}`, '', `> 자동 생성 연구 보고서 · DCV Research Platform v${t.app_version} · 생성 ${t.generated_at} · 프로젝트 ${t.project.id}`, '');
   L.push('## 0. 요약', '', ai.abstract, '');
   L.push('## 논문 사용 전 점검 사항', '', ...checklist(t).map(x => `- ${x}`), '');
+  L.push(...buildModelSection(t, { figLine, estName, clean: cleanTex }));
 
-  L.push('## 1. 연구 질문과 설계', '', '### 1.1 연구 질문', '', cleanTex(t.definition.research_question) || '-', '');
+  L.push('## 2. 연구 질문과 설계', '', '### 2.1 연구 질문', '', cleanTex(t.definition.research_question) || '-', '');
   const d = t.design, dimRows = [['σ (정보오차)', d.sigma], ['τ (처리 지연)', d.tau], ['α (정보처리 강도)', d.alpha], ['K (위임 권한)', d.K], ['d (승인 지연)', d.d], ['W (복구규칙)', d.W], ['m (조정)', d.m], ['추정기', (d.estimators || []).map(estName)]].map(([k, v]) => [k, Array.isArray(v) ? v.join(', ') : '-']);
-  L.push('### 1.2 설계공간', '', '**표 1. 후보 설계공간**', '', mdTable(['변수', '수준'], dimRows), '', `탐색 후보 수 상한: ${d.max_candidates ?? '-'}. 후보는 설계공간에서 결정적 시드(${t.reproducibility.design_seed})로 추출한 풀에서 maximin(최대 최소거리) 기준으로 선택했다.`, '');
+  L.push('### 2.2 설계공간', '', '**표 1. 후보 설계공간**', '', mdTable(['변수', '수준'], dimRows), '', `탐색 후보 수 상한: ${d.max_candidates ?? '-'}. 후보는 설계공간에서 결정적 시드(${t.reproducibility.design_seed})로 추출한 풀에서 maximin(최대 최소거리) 기준으로 선택했다.`, '');
   const cs = t.constraints;
-  L.push('### 1.3 제약조건', '', '**표 2. 위임 가능 판정 제약조건**', '', mdTable(['제약', '값'], [['평균 손실 상한', cs.loss_max], ['손실 초과율 상한', cs.loss_exceed_max], ['오수용(FP) 상한', cs.fp_max], ['미탐(FN) 상한', cs.fn_max], ['검토 부담 상한', cs.review_burden_max], ['복구시간 상한', cs.recovery_time_max], ['신뢰수준', cs.confidence]]), '');
+  L.push('### 2.3 제약조건', '', '**표 2. 위임 가능 판정 제약조건**', '', mdTable(['제약', '값'], [['평균 손실 상한', cs.loss_max], ['손실 초과율 상한', cs.loss_exceed_max], ['오수용(FP) 상한', cs.fp_max], ['미탐(FN) 상한', cs.fn_max], ['검토 부담 상한', cs.review_burden_max], ['복구시간 상한', cs.recovery_time_max], ['신뢰수준', cs.confidence]]), '');
 
-  L.push('## 2. 실증 보정 데이터', '');
+  L.push('## 3. 실증 보정 데이터', '');
   if (pn.n) {
     const ds = pn.descriptives, row = (k, n) => [n, f(ds[k]?.mean), f(ds[k]?.median), f(ds[k]?.min), f(ds[k]?.max)];
     L.push(`위기 사례 패널은 ${pn.year_min}~${pn.year_max}년 ${pn.n}건이며, 검증(verified) ${pn.verified}건, 추정(estimated) ${pn.estimated}건이다. 파산 사례 비율은 ${cip(pn.failed)}이다.`, '', '**표 3. 위기 사례 패널 기술통계**', '', mdTable(['변수', '평균', '중앙값', '최소', '최대'], [row('peak_outflow', '최대 유출률'), row('concentration', '예금 집중도'), row('digital_adoption', '디지털 이용도'), row('severity', '심각도')]), '', figLine(5));
   } else L.push('사례 패널이 아직 가져와지지 않았습니다.', '');
   if (t.empirical.parameters.length) L.push('**부록 표 A1. 실증 모수**', '', mdTable(['모수', '값', '하한', '상한', '역할', '출처 구분'], t.empirical.parameters.map(p => [p.parameter_key, f(p.value_num, 4), f(p.low_num, 4), f(p.high_num, 4), p.parameter_role, p.provenance_type])), '');
 
-  L.push('## 3. 시뮬레이션 결과', '', '### 3.1 실행 개요', '', '**표 4. 단계별 시뮬레이션 실행량**', '', mdTable(['단계', '실행 수', '에피소드 수', '결정 수'], t.simulation.phases.map(p => [p.phase, p.runs, p.episodes, p.decisions])), '');
-  L.push('### 3.2 위임 가능 영역', '', `설계 후보 ${c.total}개 중 CONFIRMED ${c.by_class.confirmed || 0}개(${pct(c.total ? (c.by_class.confirmed || 0) / c.total : 0)}), BOUNDARY ${c.by_class.boundary || 0}개, INFEASIBLE ${c.by_class.infeasible || 0}개${c.by_class.provisional ? `, 잠정 ${c.by_class.provisional}개` : ''}로 분류되었다.`, figLine(1));
+  L.push('## 4. 시뮬레이션 결과', '', '### 4.1 실행 개요', '', '**표 4. 단계별 시뮬레이션 실행량**', '', mdTable(['단계', '실행 수', '에피소드 수', '결정 수'], t.simulation.phases.map(p => [p.phase, p.runs, p.episodes, p.decisions])), '');
+  L.push('### 4.2 위임 가능 영역', '', `설계 후보 ${c.total}개 중 CONFIRMED ${c.by_class.confirmed || 0}개(${pct(c.total ? (c.by_class.confirmed || 0) / c.total : 0)}), BOUNDARY ${c.by_class.boundary || 0}개, INFEASIBLE ${c.by_class.infeasible || 0}개${c.by_class.provisional ? `, 잠정 ${c.by_class.provisional}개` : ''}로 분류되었다.`, figLine(1));
   const lv = (k, n) => c.dims[k].map(e => [n, e.level, e.total, e.confirmed, cip(e)]);
-  L.push('### 3.3 설계 변수별 위임 가능 비율', '', '**표 5. 변수 수준별 CONFIRMED 비율 (95% Wilson 구간)**', '', mdTable(['변수', '수준', '후보 수', 'CONFIRMED', '비율 [95% CI]'], [...lv('sigma', 'σ'), ...lv('tau', 'τ'), ...lv('alpha', 'α'), ...lv('K', 'K'), ...lv('d', 'd'), ...lv('W', 'W'), ...lv('m', 'm')]), '', '> 주의: 수준별 비율은 다른 변수를 통제하지 않은 주변(marginal) 비율이며 인과효과가 아니다.', '');
-  L.push('### 3.4 추정기 비교', '', '**표 6. 추정기별 성능 (후보 평균)**', '', mdTable(['추정기', '후보 수', 'CONFIRMED', '비율 [95% CI]', '평균 손실', 'FP', 'FN', '검토부담', '복구시간'], c.estimators.map(e => [estName(e.estimator), e.total, e.confirmed, cip(e), f(e.loss_mean), f(e.fp_rate), f(e.fn_rate), f(e.review_burden), f(e.recovery_time)])), '', figLine(2));
-  L.push('### 3.5 최종 후보군과 Minimax Regret', '', c.finalists.length ? `안전 제약을 통과한 후보 중 최대 후회가 가장 작은 상위 ${c.finalists.length}개를 표 7에 제시한다.` : 'CONFIRMED 후보가 없어 순위를 제시할 수 없다.', '');
+  L.push('### 4.3 설계 변수별 위임 가능 비율', '', '**표 5. 변수 수준별 CONFIRMED 비율 (95% Wilson 구간)**', '', mdTable(['변수', '수준', '후보 수', 'CONFIRMED', '비율 [95% CI]'], [...lv('sigma', 'σ'), ...lv('tau', 'τ'), ...lv('alpha', 'α'), ...lv('K', 'K'), ...lv('d', 'd'), ...lv('W', 'W'), ...lv('m', 'm')]), '', '> 주의: 수준별 비율은 다른 변수를 통제하지 않은 주변(marginal) 비율이며 인과효과가 아니다.', '');
+  L.push('### 4.4 추정기 비교', '', '**표 6. 추정기별 성능 (후보 평균)**', '', mdTable(['추정기', '후보 수', 'CONFIRMED', '비율 [95% CI]', '평균 손실', 'FP', 'FN', '검토부담', '복구시간'], c.estimators.map(e => [estName(e.estimator), e.total, e.confirmed, cip(e), f(e.loss_mean), f(e.fp_rate), f(e.fn_rate), f(e.review_burden), f(e.recovery_time)])), '', figLine(2));
+  L.push('### 4.5 최종 후보군과 Minimax Regret', '', c.finalists.length ? `안전 제약을 통과한 후보 중 최대 후회가 가장 작은 상위 ${c.finalists.length}개를 표 7에 제시한다.` : 'CONFIRMED 후보가 없어 순위를 제시할 수 없다.', '');
   if (c.finalists.length) L.push('**표 7. 강건 후보 순위 (Minimax Regret 오름차순)**', '', mdTable(['순위', '추정기', 'σ', 'τ', 'α', 'K', 'd', 'W', 'm', 'Max Regret', 'Boundary'], c.finalists.map((x, i) => [i + 1, estName(x.estimator), x.sigma, x.tau, x.alpha, x.K, x.d, x.W, x.m, f(x.max_regret, 4), f(x.boundary_score)])), '', figLine(3));
-  if (b) { const ph = Object.entries(b.by_phase); if (ph.length) L.push('### 3.6 선택 후보의 단계별 성능', '', '**표 8. 선택 후보 성능 (단계별)**', '', mdTable(['단계', 'n', '평균 손실', '손실 초과율', 'FP', 'FN', '검토부담', '복구시간', 'Regret'], ph.map(([k, v]) => [k, v.n, f(v.loss_mean, 4), f(v.loss_exceed_rate, 4), f(v.fp_rate, 4), f(v.fn_rate, 4), f(v.review_burden, 3), f(v.recovery_time, 3), f(v.regret, 4)])), ''); }
+  if (b) { const ph = Object.entries(b.by_phase); if (ph.length) L.push('### 4.6 선택 후보의 단계별 성능', '', '**표 8. 선택 후보 성능 (단계별)**', '', mdTable(['단계', 'n', '평균 손실', '손실 초과율', 'FP', 'FN', '검토부담', '복구시간', 'Regret'], ph.map(([k, v]) => [k, v.n, f(v.loss_mean, 4), f(v.loss_exceed_rate, 4), f(v.fp_rate, 4), f(v.fn_rate, 4), f(v.review_burden, 3), f(v.recovery_time, 3), f(v.regret, 4)])), ''); }
 
-  L.push('## 4. 강건성 검증', '', `시나리오 ${t.simulation.scenarios?.total ?? 0}개(역사적 ${t.simulation.scenarios?.historical ?? 0}, 적대적 ${t.simulation.scenarios?.adversarial ?? 0}) 하에서 후보를 재검증했다.`, '', '**표 9. 검증 결과 집계**', '', mdTable(['검증 유형', '판정', '건수'], t.simulation.validations.map(v => [v.validation_type, v.status, v.n])), '');
+  L.push('## 5. 강건성 검증', '', `시나리오 ${t.simulation.scenarios?.total ?? 0}개(역사적 ${t.simulation.scenarios?.historical ?? 0}, 적대적 ${t.simulation.scenarios?.adversarial ?? 0}) 하에서 후보를 재검증했다.`, '', '**표 9. 검증 결과 집계**', '', mdTable(['검증 유형', '판정', '건수'], t.simulation.validations.map(v => [v.validation_type, v.status, v.n])), '');
 
-  L.push('## 5. 인간 검토자 보정', '');
+  L.push('## 6. 인간 검토자 보정', '');
   if (rv.n) {
     L.push(`검토자 관측 ${rv.n}건(참가자 ${rv.participants}명), 평균 응답시간 ${f(rv.mean_rt_ms / 1000, 2)}초.`, '', '**표 10. 인간 검토자 행동 모수 (95% Wilson 구간)**', '', mdTable(['지표', '추정치 [95% CI]'], [['적정 의존율 (ARR)', cip(rv.arr)], ['오수용률 (AI 오답 수용)', cip(rv.false_accept)], ['정정 개입률 (AI 오답 개입)', cip(rv.correct_override)], ['불필요 개입률 (AI 정답 개입)', cip(rv.unnecessary_override)]]), '', '**표 11. AI 신뢰도별 수용률**', '', mdTable(['AI 신뢰도', 'n', '정답 시 수용', '오답 시 수용', '평균 응답시간(ms)'], rv.by_confidence.map(x => [x.confidence, x.n, cip(x.accept_when_correct), cip(x.accept_when_wrong), f(x.mean_rt_ms, 0)])), '', figLine(4));
   } else L.push('검토자 관측이 없습니다.', '');
 
-  L.push('## 6. 최종 판정', '', t.approval ? `- 판정: **${t.approval.decision}** (Evidence Level ${t.approval.evidence_level}, ${t.approval.automatic ? '자동' : '수동'} 승인, ${t.approval.created_at})` : '- 판정: 미확정', b ? `- 선택 후보: 추정기 ${estName(b.estimator)}, σ=${b.sigma}, τ=${b.tau}, α=${b.alpha}, K=${b.K}, d=${b.d}, W=${b.W}, m=${b.m}\n- Minimax Regret ${f(b.max_regret, 4)}, Boundary Score ${f(b.boundary_score)}` : '', t.approval?.basis?.selection_rule ? `- 선택 규칙: ${t.approval.basis.selection_rule}` : '', '');
+  L.push('## 7. 최종 판정', '', t.approval ? `- 판정: **${t.approval.decision}** (Evidence Level ${t.approval.evidence_level}, ${t.approval.automatic ? '자동' : '수동'} 승인, ${t.approval.created_at})` : '- 판정: 미확정', b ? `- 선택 후보: 추정기 ${estName(b.estimator)}, σ=${b.sigma}, τ=${b.tau}, α=${b.alpha}, K=${b.K}, d=${b.d}, W=${b.W}, m=${b.m}\n- Minimax Regret ${f(b.max_regret, 4)}, Boundary Score ${f(b.boundary_score)}` : '', t.approval?.basis?.selection_rule ? `- 선택 규칙: ${t.approval.basis.selection_rule}` : '', '');
 
-  L.push('## 7. 논의', '', ai.discussion, '', '## 8. 한계 및 타당성 위협', '', ...arr(ai.limitations).map(x => `- ${x}`), '', '## 9. 시사점과 후속 연구', '', ...arr(ai.implications).map(x => `- ${x}`), '', '**후속 연구**', '', ...arr(ai.next_steps).map(x => `- ${x}`), '');
+  L.push('## 8. 논의', '', ai.discussion, '', '## 9. 한계 및 타당성 위협', '', ...arr(ai.limitations).map(x => `- ${x}`), '', '## 10. 시사점과 후속 연구', '', ...arr(ai.implications).map(x => `- ${x}`), '', '**후속 연구**', '', ...arr(ai.next_steps).map(x => `- ${x}`), '');
 
   L.push('## 부록 B. 재현성 정보', '', mdTable(['항목', '값'], [['플랫폼 버전', t.app_version], ['프로젝트 ID', t.project.id], ['설계 시드', t.reproducibility.design_seed], ['정의 버전', t.definition.version], ['실증 프로파일', t.empirical.profile], ['검토자 모델 버전', rv.model_version], ['감사 로그', `${t.reproducibility.audit.n}건 (${t.reproducibility.audit.first_at || '-'} ~ ${t.reproducibility.audit.last_at || '-'})`], ['작업 집계', t.reproducibility.jobs.map(j => `${j.type}:${j.status}=${j.n}`).join('; ') || '-']]), '', '---', `요약·논의 생성 방식: ${sourceNote}`, '본 보고서의 표와 그림은 D1에 저장된 실행 기록에서 계산되었습니다. 문장형 요약은 초안이므로 표의 수치와 대조하십시오.', '');
   return L.join('\n');
@@ -122,4 +124,16 @@ function rvLimit(t) {
   if (pn.n) L.push(`위기 사례 ${pn.n}건 중 ${pn.estimated}건은 추정값으로, 측정오차가 결과에 전파될 수 있다.`);
   L.push('후보 수준별 비율은 주변 비율이며 변수 간 상호작용과 인과효과를 식별하지 못한다.');
   return L;
+}
+
+// 이전 버전(연구모형 절이 없는)으로 저장된 보고서를 열 때, 저장된 요약·논의 문장은 그대로 두고
+// 현재 D1 집계로 본문을 다시 조립한다(AI 호출 없음). 이미 연구모형 절이 있으면 그대로 돌려준다.
+export async function upgradeStoredReport(env, projectId, row) {
+  if (!row || String(row.content_markdown || '').includes(MODEL_MARKER)) return row;
+  const data = JSON.parse(row.data_json || '{}'), nar = data.narrative;
+  if (!nar || !nar.abstract) return row;
+  const t = await buildThesisData(env, projectId), note = data.ai_meta?.ok ? `Workers AI (${data.ai_meta.model})` : '규칙 기반 (저장된 요약 재사용)';
+  const md = buildMarkdown(t, nar, note + ' · 연구모형 절 자동 추가');
+  await run(env.DB, `UPDATE reports SET content_markdown=? WHERE id=?`, [md, row.id]);
+  return { ...row, content_markdown: md };
 }

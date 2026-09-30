@@ -19,3 +19,9 @@
 .fig-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:14px}.fig-card{background:#fff;color:#111;border-radius:10px;padding:10px}.fig-card .btn-ghost{color:#0b3d52;border-color:#0b3d5255;background:#f3f9fb}.fig-prev svg{width:100%;height:auto;display:block}.fig-cap{font-size:12px;margin:6px 0 8px;color:#333}
 .report-html{background:#fff;color:#111;border-radius:10px;padding:22px 26px;line-height:1.7;font-size:14px}.report-html h1{font-size:22px}.report-html h2{font-size:18px;margin-top:1.6em;border-bottom:1px solid #aaa;padding-bottom:.2em}.report-html h3{font-size:15px;margin-top:1.2em}.report-html table{border-collapse:collapse;width:100%;font-size:12.5px;margin:.3em 0 1.1em;display:block;overflow-x:auto}.report-html th,.report-html td{padding:4px 8px;text-align:left;vertical-align:top;white-space:nowrap}.report-html thead th{border-top:1.5px solid #111;border-bottom:1px solid #111}.report-html tbody tr:last-child td{border-bottom:1.5px solid #111}.report-html blockquote{border-left:3px solid #999;background:#f5f5f5;margin:.8em 0;padding:.4em .9em;color:#444}.report-html figure{text-align:center;margin:1em 0 .2em}.report-html figure svg{max-width:100%;height:auto}.report-html p.tcap{font-weight:700;margin-bottom:.2em}.report-html p.fcap{text-align:center;color:#333;font-size:12.5px}
 
+
+/* 보고서 수식 · 연구모형 */
+.report-html .eq{display:flex;align-items:center;justify-content:space-between;margin:.55rem 0;padding:.4rem .7rem;background:#f3f7fa;border-left:3px solid #0072B2;border-radius:4px;font-family:'Cambria Math','STIX Two Math','Times New Roman','Noto Serif KR',serif;font-size:1.05rem}
+.report-html .eqb{flex:1;text-align:center;overflow-x:auto}
+.report-html .eqn{flex:none;margin-left:1rem;opacity:.75}
+.report-html span.m{font-family:'Cambria Math','STIX Two Math','Times New Roman',serif}

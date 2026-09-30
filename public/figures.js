@@ -9,7 +9,11 @@ const fx = (v, d = 2) => Number(v).toFixed(d).replace(/\.?0+$/, '') || '0';
 const pct = v => `${Math.round(v * 100)}%`;
 
 export function figureCatalog(t) {
-  const figs = [];
+  const figs = [
+    { n: 11, label: 'M1', file: 'figM1_research_model', title: '박사논문 연구모형: 데이터–결정 사슬과 위임 가능 영역 D의 정의' },
+    { n: 12, label: 'M2', file: 'figM2_dcv_design', title: '연구설계: Define–Compute–Validate–Confirm 단계, 게이트, 논문 3편의 대응 및 현재 프로젝트 진행 상태' },
+    { n: 13, label: 'M3', file: 'figM3_region_concept', title: '위임 가능 영역 개념도 (모식도): 이상적 검토자 영역과 실제 검토자 영역' }
+  ];
   if (t.candidates.cells.length) figs.push({ n: 1, file: 'fig1_feasible_region_heatmap', title: 'σ×α 평면의 위임 가능 후보 비율 (셀 내 CONFIRMED / 전체 후보)' });
   if (t.candidates.estimators.length) figs.push({ n: 2, file: 'fig2_estimator_feasibility', title: '추정기별 위임 가능 비율과 95% Wilson 신뢰구간' });
   if (t.candidates.finalists.length) figs.push({ n: 3, file: 'fig3_regret_ranking', title: '강건 후보의 Minimax Regret 순위 (낮을수록 우수)' });
@@ -100,7 +104,113 @@ export function figEpisodes(t) {
   return wrap(W, H, body, '위기 사례 패널 최대 유출률 대비 심각도');
 }
 
-const BUILDERS = { 1: figHeatmap, 2: figEstimators, 3: figRegret, 4: figReviewer, 5: figEpisodes };
+
+/* ---------- 연구모형·연구설계 그림 (개념도: 데이터가 없어도 항상 생성, 제약값·진행상태는 프로젝트 자료 반영) ---------- */
+// 텍스트 안의 X_{sub} 를 tspan 아래첨자로 변환 (baseline-shift 미지원 렌더러 대비 dy 사용)
+const SUBMAP = { a: 'ₐ', e: 'ₑ', h: 'ₕ', i: 'ᵢ', j: 'ⱼ', k: 'ₖ', l: 'ₗ', m: 'ₘ', n: 'ₙ', o: 'ₒ', p: 'ₚ', r: 'ᵣ', s: 'ₛ', t: 'ₜ', u: 'ᵤ', v: 'ᵥ', x: 'ₓ', 0: '₀', 1: '₁', 2: '₂', 3: '₃', 4: '₄', 5: '₅', 6: '₆', 7: '₇', 8: '₈', 9: '₉' };
+function rich(s) {          // X_{sub}: 유니코드 아래첨자가 있으면 그대로, 없으면 dy 이동 tspan(시작 정렬 텍스트에서만 사용)
+  const parts = String(s ?? '').split(/(_\{[^}]*\})/); let shifted = false, out = '';
+  for (const p of parts) {
+    if (/^_\{/.test(p)) { const sub = p.slice(2, -1); if ([...sub].every(ch => SUBMAP[ch])) { out += esc([...sub].map(ch => SUBMAP[ch]).join('')); shifted = false; } else { out += `<tspan dy="3" font-size="0.72em">${esc(sub)}</tspan>`; shifted = true; } }
+    else if (p) { out += shifted ? `<tspan dy="-3">${esc(p)}</tspan>` : esc(p); shifted = false; }
+  }
+  return out;
+}
+const rtext = (x, y, s, o = {}) => `<text x="${x}" y="${y}" font-size="${o.size || 13}" fill="${o.fill || C.ink}" text-anchor="${o.anchor || 'start'}"${o.weight ? ` font-weight="${o.weight}"` : ''}${o.italic ? ' font-style="italic"' : ''}>${rich(s)}</text>`;
+const box = (x, y, w, h, o = {}) => `<rect x="${x}" y="${y}" width="${w}" height="${h}" rx="${o.rx ?? 8}" fill="${o.fill || '#fff'}" stroke="${o.stroke || C.ink}" stroke-width="${o.sw || 1.4}"${o.dash ? ` stroke-dasharray="${o.dash}"` : ''}/>`;
+const arrow = (x1, y1, x2, y2, o = {}) => { const a = Math.atan2(y2 - y1, x2 - x1), L = 9, w = .42, p1 = [x2 - L * Math.cos(a - w), y2 - L * Math.sin(a - w)], p2 = [x2 - L * Math.cos(a + w), y2 - L * Math.sin(a + w)]; return `<line x1="${x1}" y1="${y1}" x2="${x2 - 6 * Math.cos(a)}" y2="${y2 - 6 * Math.sin(a)}" stroke="${o.stroke || C.ink}" stroke-width="${o.sw || 1.6}"${o.dash ? ` stroke-dasharray="${o.dash}"` : ''}/><polygon points="${x2},${y2} ${p1[0]},${p1[1]} ${p2[0]},${p2[1]}" fill="${o.stroke || C.ink}"/>`; };
+const num = v => (v == null || !Number.isFinite(Number(v))) ? '-' : String(Number(v));
+
+export function figResearchModel(t) {
+  const W = 960, H = 830, cx = 330, bx = 80, bw = 500; let b = '';
+  const layer = (y, h, no, title, sub, fill, stroke) => { b += box(bx, y, bw, h, { fill, stroke }) + rtext(bx + 14, y + 22, `${no} ${title}`, { size: 14, weight: 700 }) + rtext(bx + 14, y + 42, sub, { size: 12, fill: '#333' }); };
+  b += rtext(bx, 24, '데이터–결정 사슬 (Data–Decision Chain)', { size: 15, weight: 700 });
+  // 환경
+  b += box(bx, 40, bw, 54, { fill: '#f2f2f2', stroke: C.mute, dash: '5 3' }) + rtext(cx, 62, '환경 불확실성  s ∈ S', { size: 14, weight: 700, anchor: 'middle' }) + rtext(cx, 82, '확률적 충격 · 위기유형 · 계수 불확실성 · 상황변화 (Historical ∪ Synthetic ∪ Adversarial)', { size: 11.5, anchor: 'middle', fill: '#333' });
+  const ys = [118, 204, 290, 376];
+  layer(ys[0], 66, '①', '데이터 품질', '정보오차 σ │ 시차 τ │ 누락·이상치 │ 변화속도', '#e8f3fb', C.blue);
+  layer(ys[1], 66, '②', '정보 처리  E', 'EMA(α) │ Kalman │ 변화점 탐지 │ 적응형 추정기', '#e8f3fb', C.blue);
+  layer(ys[2], 66, '③', '알고리즘 판단', '지급 · 지급정지 · 한도조정 · 추가검토 + 신뢰도(confidence)', '#e8f3fb', C.blue);
+  layer(ys[3], 66, '④', '위임 권한  K', 'K0 인간전결 │ K1 AI추천+승인 │ K2 일정범위 자동 │ K3 광범위 자동', '#fff4dc', C.warn);
+  [0, 1, 2].forEach(i => { b += arrow(cx, ys[i] + 66, cx, ys[i + 1], {}); }); b += arrow(cx, 94, cx, ys[0], {});
+  // ⑤ 분기
+  const y5 = 474, hw = 240;
+  b += box(bx, y5, hw, 64, { fill: '#fff4dc', stroke: C.warn }) + rtext(bx + 12, y5 + 22, '⑤ 인간 검토·승인', { size: 13.5, weight: 700 }) + rtext(bx + 12, y5 + 42, '승인 지연 d · 인간 편향 · 오류수정', { size: 11.5, fill: '#333' });
+  b += box(bx + bw - hw, y5, hw, 64, { fill: '#fff4dc', stroke: C.warn }) + rtext(bx + bw - hw + 12, y5 + 22, '⑤ 자동 집행', { size: 13.5, weight: 700 }) + rtext(bx + bw - hw + 12, y5 + 42, '즉시 또는 제한적 실행 (K≥2)', { size: 11.5, fill: '#333' });
+  b += arrow(cx - 80, ys[3] + 66, bx + hw / 2, y5) + arrow(cx + 80, ys[3] + 66, bx + bw - hw / 2, y5);
+  const y6 = 574; layer(y6, 66, '⑥', '실제 결과', '손실 L │ 부정지급 FP │ 정상지급 차단 FN │ 검토부담 B │ 복구시간 T_{R}', '#fde9e0', C.bad);
+  b += arrow(bx + hw / 2, y5 + 64, bx + hw / 2 + 30, y6) + arrow(bx + bw - hw / 2, y5 + 64, bx + bw - hw / 2 - 30, y6);
+  const y7 = 676; layer(y7, 66, '⑦', '복구 규칙', '여유폭 W │ 재조정 기준 m │ rollback │ 재검토', '#e3f5ee', C.ok);
+  b += arrow(cx, y6 + 66, cx, y7);
+  // 피드백 루프
+  b += `<path d="M ${bx} ${y7 + 33} L 44 ${y7 + 33} L 44 ${ys[0] + 33} L ${bx - 3} ${ys[0] + 33}" fill="none" stroke="${C.ok}" stroke-width="1.8" stroke-dasharray="6 4"/><polygon points="${bx},${ys[0] + 33} ${bx - 9},${ys[0] + 28} ${bx - 9},${ys[0] + 38}" fill="${C.ok}"/>` + rtext(36, (y7 + ys[0]) / 2 + 40, 'Feedback Loop: 데이터 · 추정 · 권한 보정', { size: 11.5, fill: C.ok, weight: 700, anchor: 'middle' }).replace('<text ', `<text transform="rotate(-90 36 ${(y7 + ys[0]) / 2 + 40})" `);
+  // 우측: 제약 → D
+  const rx = 640, rw = 290, cs = t.constraints || {};
+  b += box(rx, 118, rw, 268, { fill: '#fff', stroke: C.ink }) + rtext(rx + 14, 142, '제약조건  g_{j}(x,s) ≤ c_{j}', { size: 14, weight: 700 });
+  const rows = [['평균 손실', `L ≤ ${num(cs.loss_max)}`], ['손실 초과', `P(L>L_{max}) ≤ ${num(cs.loss_exceed_max)}`], ['부정지급', `FP ≤ ${num(cs.fp_max)}`], ['정상지급 차단', `FN ≤ ${num(cs.fn_max)}`], ['검토부담', `B ≤ ${num(cs.review_burden_max)}`], ['복구시간', `T_{R} ≤ ${num(cs.recovery_time_max)}`]];
+  rows.forEach((r, i) => { b += rtext(rx + 14, 172 + i * 28, r[0], { size: 12.5, fill: '#333' }) + rtext(rx + 130, 172 + i * 28, r[1], { size: 12.5, weight: 600 }); });
+  b += rtext(rx + 14, 356, `신뢰수준 ${num(cs.confidence)} · 신뢰구간 상·하한으로 판정`, { size: 11.5, fill: C.mute });
+  b += `<path d="M ${bx + bw} ${y6 + 33} L 612 ${y6 + 33} L 612 330 L ${rx - 4} 330" fill="none" stroke="${C.bad}" stroke-width="1.6" stroke-dasharray="6 4"/><polygon points="${rx},330 ${rx - 9},325 ${rx - 9},335" fill="${C.bad}"/>` + rtext(618, 322, '결과 평가', { size: 11, fill: C.bad, weight: 700 });
+  b += arrow(rx + rw / 2, 386, rx + rw / 2, 440);
+  b += box(rx, 440, rw, 190, { fill: '#e3f5ee', stroke: C.ok, sw: 2.2 }) + rtext(rx + rw / 2, 468, '위임 가능 영역  D', { size: 16, weight: 700, anchor: 'middle' }) + rtext(rx + rw / 2, 494, 'x = (σ, τ, α, K, d, W, m, E)', { size: 13, anchor: 'middle' }) + rtext(rx + rw / 2, 520, 'P[ g_{j}(x,S) ≤ c_{j} ] ≥ 1 − ε_{j}, ∀j', { size: 13, anchor: 'middle' }) + rtext(rx + rw / 2, 552, 'FEASIBLE · UNRESOLVED · INFEASIBLE', { size: 11.5, anchor: 'middle', fill: '#333' }) + rtext(rx + rw / 2, 574, 'Safety first → Minimax Regret second', { size: 12, anchor: 'middle', weight: 700, fill: C.ok }) + rtext(rx + rw / 2, 600, 'UNRESOLVED ≠ INFEASIBLE', { size: 11.5, anchor: 'middle', fill: C.bad, weight: 700 });
+  b += rtext(rx + rw / 2, 668, '핵심 질문', { size: 12, anchor: 'middle', fill: C.mute }) + rtext(rx + rw / 2, 692, 'Where can authority', { size: 14, anchor: 'middle', weight: 700 }) + rtext(rx + rw / 2, 712, 'safely be delegated?', { size: 14, anchor: 'middle', weight: 700 });
+  b += rtext(W / 2, H - 14, 'Noise → Estimation → Decision → Delegation → Execution → Recovery', { size: 12.5, anchor: 'middle', fill: C.mute });
+  return wrap(W, H, b, '박사논문 연구모형: 데이터 결정 사슬과 위임 가능 영역');
+}
+
+export function figDcvDesign(t) {
+  const W = 1040, H = 474, bw = 158, gap = 48, x0 = 32, y0 = 92, bh = 150; let b = '';
+  const ap = t.approval, cands = t.candidates || { total: 0, by_class: {} }, rv = t.reviewer || { n: 0 }, vals = t.simulation?.validations || [];
+  const nVal = vals.reduce((a, v) => a + (Number(v.n) || 0), 0);
+  const stages = [
+    { k: 'DEFINE', sub: 'RQ1 · 제1편', lines: ['연구문제·변수·제약 정의', '위임수준 K0–K3', '복구규칙 W·m'], gate: 'Gate D0–D6', col: C.blue, fill: '#e8f3fb', st: `정의 v${t.definition?.version ?? '-'}` },
+    { k: 'COMPUTE', sub: 'RQ2 · 제2편', lines: ['CDRS 경계 탐색', '탐색/확인 시드 분리', 'Historical·Synthetic·Stress'], gate: 'Gate C1–C8', col: C.ok, fill: '#e3f5ee', st: `후보 ${cands.total} · 확정 ${cands.by_class?.confirmed || 0}` },
+    { k: 'VALIDATE', sub: 'RQ3 · 제3편', lines: ['독립표본 · 두 번째 사례', '인간 검토자 실험', 'ARR · ERT · FAR'], gate: 'Gate V1–V6', col: C.warn, fill: '#fff4dc', st: `검증 ${nVal}건 · 검토 ${rv.n}건` },
+    { k: 'RE-COMPUTE', sub: '인간 행동 재투입', lines: ['검토자 모형 교체', 'Perfect → Empirical', 'D(ideal) vs D(human)'], gate: 'CI 재판정', col: C.bad, fill: '#fde9e0', st: rv.n ? (t.reviewer.model_version != null ? `검토자 모형 v${t.reviewer.model_version}` : '검토자 모형 적용') : '검토자 모형 없음' },
+    { k: 'CONFIRM', sub: '최종 확정', lines: ['D* 확정', 'Boundary / Prohibited 구분', 'Evidence Level A–D'], gate: 'Approve', col: '#6a3d9a', fill: '#f1e9f7', st: ap ? `${String(ap.decision).replace('_DELEGATION', '')} · Level ${ap.evidence_level}` : '미확정' }
+  ];
+  b += rtext(x0, 26, 'DCV-C 연구설계 (Define → Compute → Validate → Re-compute → Confirm)', { size: 15, weight: 700 });
+  stages.forEach((s, i) => {
+    const x = x0 + i * (bw + gap);
+    b += box(x, y0, bw, bh, { fill: s.fill, stroke: s.col, sw: 2 }) + rtext(x + bw / 2, y0 + 26, s.k, { size: 15, weight: 700, anchor: 'middle', fill: s.col }) + rtext(x + bw / 2, y0 + 46, s.sub, { size: 11.5, anchor: 'middle', fill: '#333', weight: 600 });
+    s.lines.forEach((l, j) => { b += rtext(x + bw / 2, y0 + 76 + j * 22, l, { size: 11.5, anchor: 'middle' }); });
+    if (i < stages.length - 1) b += arrow(x + bw, y0 + bh / 2, x + bw + gap, y0 + bh / 2);
+    // 게이트
+    b += box(x + 14, y0 + bh + 26, bw - 28, 30, { rx: 15, fill: '#fff', stroke: s.col }) + rtext(x + bw / 2, y0 + bh + 46, s.gate, { size: 12.5, anchor: 'middle', weight: 700, fill: s.col }) + `<line x1="${x + bw / 2}" y1="${y0 + bh}" x2="${x + bw / 2}" y2="${y0 + bh + 26}" stroke="${s.col}" stroke-width="1.4"/>`;
+    // 현재 상태
+    b += box(x, 350, bw, 44, { rx: 6, fill: '#fafafa', stroke: C.grid }) + rtext(x + bw / 2, 368, '현재 프로젝트', { size: 10.5, anchor: 'middle', fill: C.mute }) + rtext(x + bw / 2, 385, s.st, { size: 11.5, anchor: 'middle', weight: 700 });
+  });
+  b += rtext(x0, y0 + bh + 84, '게이트 판정:', { size: 12.5, weight: 700 }) + rtext(x0 + 88, y0 + bh + 84, 'CONFIRM(다음 단계) │ REVISE(수정 후 재평가) │ HOLD(근거 부족, 보류) │ REJECT(후보·설계 제거)', { size: 12.5 });
+  // 피드백 (인간행동 → Compute)
+  const xv = x0 + 3 * (bw + gap) + bw / 2, xc = x0 + 1 * (bw + gap) + bw / 2;
+  b += `<path d="M ${xv} ${y0} L ${xv} ${y0 - 26} L ${xc} ${y0 - 26} L ${xc} ${y0 - 2}" fill="none" stroke="${C.bad}" stroke-width="1.6" stroke-dasharray="6 4"/><polygon points="${xc},${y0} ${xc - 5},${y0 - 9} ${xc + 5},${y0 - 9}" fill="${C.bad}"/>` + rtext((xv + xc) / 2, y0 - 34, '폐쇄 루프: 실제 인간 행동(ARR·정정개입률·지연)을 Compute 모형에 재투입', { size: 11.5, anchor: 'middle', fill: C.bad, weight: 700 });
+  b += rtext(W / 2, 424, '논문 1편 = Define (정식화) · 논문 2편 = Compute (계산·경계 검증) · 논문 3편 = Validate (외적 타당성·인간 행동)', { size: 12.5, anchor: 'middle', weight: 700 });
+  b += rtext(W / 2, 448, '세 편은 동일한 수학적 객체 D (위임 가능 영역)를 공유: 제1편 정의 → 제2편 계산 → 제3편 재계산', { size: 12, anchor: 'middle', fill: C.mute });
+  return wrap(W, H, b, 'DCV-C 연구설계와 게이트, 논문 3편의 대응');
+}
+
+export function figRegionConcept() {
+  const W = 760, H = 520, m = { l: 96, r: 40, t: 50, b: 84 }, pw = W - m.l - m.r, ph = H - m.t - m.b;
+  const X = v => m.l + pw * v, Y = k => m.t + ph * (1 - k / 3.4);
+  // 경계: σ 구간별 위임 가능한 최대 K (계단형)
+  const ideal = [3, 3, 2, 2, 1, 0], human = [2, 2, 1, 1, 0, 0], n = ideal.length, sw = 1 / n;
+  const stair = arr => { let d = `M ${X(0)} ${Y(arr[0] + .4)}`; arr.forEach((k, i) => { d += ` L ${X((i + 1) * sw)} ${Y(k + .4)}`; if (i < n - 1) d += ` L ${X((i + 1) * sw)} ${Y(arr[i + 1] + .4)}`; }); return d; };
+  let b = '';
+  b += `<rect x="${m.l}" y="${m.t}" width="${pw}" height="${ph}" fill="#fde9e0"/>`;
+  const fill = (arr, col, op) => { let d = `M ${X(0)} ${Y(0)}`; arr.forEach((k, i) => { d += ` L ${X(i * sw)} ${Y(k + .4)} L ${X((i + 1) * sw)} ${Y(k + .4)}`; }); d += ` L ${X(1)} ${Y(0)} Z`; return `<path d="${d}" fill="${col}" fill-opacity="${op}"/>`; };
+  b += fill(ideal, C.ok, .28) + fill(human, C.ok, .42);
+  for (let k = 0; k <= 3; k++) b += `<line x1="${m.l}" x2="${m.l + pw}" y1="${Y(k)}" y2="${Y(k)}" stroke="${C.grid}"/>` + rtext(m.l - 12, Y(k) + 4, `K${k}`, { anchor: 'end', size: 13 });
+  b += `<path d="${stair(ideal)}" fill="none" stroke="${C.ok}" stroke-width="2.6"/><path d="${stair(human)}" fill="none" stroke="${C.blue}" stroke-width="2.6" stroke-dasharray="7 4"/>`;
+  b += `<line x1="${m.l}" x2="${m.l}" y1="${m.t}" y2="${m.t + ph}" stroke="${C.ink}"/><line x1="${m.l}" x2="${m.l + pw}" y1="${m.t + ph}" y2="${m.t + ph}" stroke="${C.ink}"/>`;
+  b += rtext(m.l + pw / 2, H - 46, 'σ (정보오차)  →  커질수록 위임 가능 권한 K*(σ) 하락', { anchor: 'middle', size: 13.5, weight: 700 }) + rtext(28, m.t + ph / 2, '위임 권한 K', { anchor: 'middle', size: 13.5, weight: 700 }).replace('<text ', `<text transform="rotate(-90 28 ${m.t + ph / 2})" `);
+  b += rtext(X(.04), Y(1.0), 'D(human): 실제 검토자 영역', { size: 12.5, weight: 700, fill: '#fff' }) + rtext(X(.04), Y(2.9), 'D(ideal): 이상적 검토자 영역', { size: 12.5, weight: 700, fill: '#00694e' }) + rtext(X(.62), Y(3.05), 'INFEASIBLE (금지 영역)', { size: 12.5, weight: 700, fill: C.bad });
+  b += arrow(X(.50), Y(2.62), X(.60), Y(2.62), { stroke: C.mute }) + rtext(X(.615), Y(2.62) + 4, 'α, d, W 조정 → 경계 이동', { size: 11.5, fill: C.mute });
+  b += legendRow(m.l, H - 18, [{ mark: `<line x1="0" x2="14" y1="0" y2="0" stroke="${C.ok}" stroke-width="2.6"/>`, label: '이상적 검토자 영역 경계', w: 150 }, { mark: `<line x1="0" x2="14" y1="0" y2="0" stroke="${C.blue}" stroke-width="2.6" stroke-dasharray="5 3"/>`, label: '실제 검토자 영역 경계 (P4: 변화 여부 검증 대상)', w: 330 }, { mark: `<rect width="12" height="12" y="-6" fill="#fde9e0"/>`, label: '제약 위반', w: 100 }]);
+  b += rtext(W - m.r, 30, '※ 모식도: 실제 계산 결과가 아님', { size: 11.5, anchor: 'end', fill: C.mute });
+  return wrap(W, H, b, '위임 가능 영역 개념도: 이상적 검토자와 실제 검토자');
+}
+
+const BUILDERS = { 1: figHeatmap, 2: figEstimators, 3: figRegret, 4: figReviewer, 5: figEpisodes, 11: figResearchModel, 12: figDcvDesign, 13: figRegionConcept };
 export function buildFigures(t) {
   return figureCatalog(t).map(g => { const svg = BUILDERS[g.n](t), m = /viewBox="0 0 (\d+) (\d+)"/.exec(svg); return { ...g, svg, width: +m[1], height: +m[2] }; });
 }

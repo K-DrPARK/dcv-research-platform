@@ -30,3 +30,26 @@ test('External Validation Matrix keeps unavailable external layers as N/A rather
   await refreshValidationMatrix({DB},pid);const x=(await getValidationMatrix({DB},pid)).rows[0];
   assert.equal(x.synthetic_status,'PASS');assert.equal(x.bis_status,'NA');assert.equal(x.ecb_status,'NA');assert.equal(x.human_status,'NA');assert.equal(x.overall_status,'PARTIAL');
 });
+
+test('Figure 7 survival funnel uses strict cumulative PASS and exposes N/A layers safely', async()=>{
+  const {buildFigures}=await import('../public/figures.js');
+  const t={
+    candidates:{cells:[],estimators:[],finalists:[]},reviewer:{by_confidence:[]},empirical:{panel:{n:0,episodes:[]}},
+    validation_matrix:{rows:[{candidate_id:'a'}]},
+    survival_funnel:{initial_candidates:4,final_survivors:1,final_rate:.25,stages:[
+      {key:'baseline',stage:'Candidate pool',total:4,survivors:4,eliminated:0,pending:0,unavailable:false,survival_rate:1},
+      {key:'synthetic',stage:'Synthetic',total:4,survivors:3,eliminated:1,pending:0,unavailable:false,survival_rate:.75},
+      {key:'historical',stage:'Historical',total:3,survivors:2,eliminated:1,pending:0,unavailable:false,survival_rate:.5},
+      {key:'adversarial',stage:'Adversarial',total:2,survivors:1,eliminated:1,pending:0,unavailable:false,survival_rate:.25},
+      {key:'bis',stage:'BIS',total:1,survivors:1,eliminated:0,pending:1,unavailable:true,survival_rate:.25},
+      {key:'ecb',stage:'ECB',total:1,survivors:1,eliminated:0,pending:0,unavailable:false,survival_rate:.25},
+      {key:'human',stage:'Human',total:1,survivors:1,eliminated:0,pending:0,unavailable:false,survival_rate:.25}
+    ]}
+  };
+  const figs=buildFigures(t),f=figs.find(x=>x.n===7);
+  assert.ok(f);
+  assert.match(f.svg,/Delegation Evidence Funnel/);
+  assert.match(f.svg,/Final strict survivors: 1 \/ 4/);
+  assert.match(f.svg,/N\/A · gate unavailable/);
+  assert.ok(!/undefined|NaN/.test(f.svg));
+});

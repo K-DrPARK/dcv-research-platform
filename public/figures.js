@@ -21,6 +21,7 @@ export function figureCatalog(t) {
   if (t.reviewer.by_confidence.length) figs.push({ n: 4, file: 'fig4_reviewer_reliance', title: 'AI 신뢰도별 인간 검토자 수용률 (AI 정답/오답 구분, 95% CI)' });
   if (t.empirical.panel.n) figs.push({ n: 5, file: 'fig5_episode_panel', title: '위기 사례 패널: 최대 유출률 대비 심각도 (파산 여부 구분)' });
   if (t.validation_matrix?.rows?.length) figs.push({ n: 6, file: 'fig6_external_validation_matrix', title: '후보별 External Validation Matrix (Historical · Synthetic · Adversarial · BIS · ECB · Human)' });
+  if (t.survival_funnel?.stages?.length) figs.push({ n: 7, file: 'fig7_delegation_evidence_funnel', title: 'Delegation Evidence Funnel: 검증층을 통과하며 축소되는 후보 집합' });
   return figs;
 }
 
@@ -94,6 +95,27 @@ export function figExternalValidationMatrix(t) {
   const summaryLine=(vm.summary||[]).map(x=>`${x.stage} ${x.PASS||0}/${x.observed||0}`).join('   ·   ');body+=text(m.l,H-51,`PASS / 관측 후보: ${summaryLine}`,{size:10.5,fill:C.mute});
   body+=legendRow(m.l,H-21,[{mark:`<rect width="12" height="12" y="-6" fill="${fill.PASS}"/>`,label:'PASS',w:85},{mark:`<rect width="12" height="12" y="-6" fill="${fill.HOLD}"/>`,label:'HOLD',w:85},{mark:`<rect width="12" height="12" y="-6" fill="${fill.FAIL}"/>`,label:'FAIL',w:85},{mark:`<rect width="12" height="12" y="-6" fill="${fill.MISSING}"/>`,label:'N/A',w:110},{mark:'',label:`N=${rows.length} candidates`,w:150}]);
   return wrap(W,H,body,'후보별 external validation matrix');
+}
+
+export function figDelegationEvidenceFunnel(t) {
+  const f=t.survival_funnel||{stages:[]},stages=(f.stages||[]);
+  if(stages.length<2)return wrap(760,220,text(380,110,'Delegation evidence funnel unavailable',{anchor:'middle',size:16,weight:700}),'Delegation evidence funnel');
+  const W=980,H=650,cx=W/2,top=94,stepH=68,gap=10,maxW=760,minW=165,initial=Math.max(1,Number(f.initial_candidates||stages[0]?.survivors||1));
+  const widthFor=n=>Math.max(minW,maxW*Math.sqrt(Math.max(0,Number(n))/initial));
+  const cols=['#0072B2','#56B4E9','#009E73','#E69F00','#6a3d9a','#D55E00','#555'];
+  let body=text(cx,30,'Delegation Evidence Funnel',{anchor:'middle',size:19,weight:700})+text(cx,53,'Synthetic → Historical → Adversarial → BIS → ECB → Human',{anchor:'middle',size:12,fill:C.mute});
+  stages.forEach((st,i)=>{
+    const y=top+i*(stepH+gap),w=widthFor(st.survivors),next=stages[i+1],w2=next?widthFor(next.survivors):w,x=cx-w/2,yn=y+stepH;
+    const fill=st.unavailable?'#ececec':cols[Math.min(i,cols.length-1)];
+    if(i<stages.length-1){const nx=cx-w2/2;body+=`<path d="M ${x} ${y} L ${x+w} ${y} L ${nx+w2} ${yn} L ${nx} ${yn} Z" fill="${fill}" fill-opacity="${st.unavailable?.58:.88}" stroke="#fff" stroke-width="2"/>`;}
+    else body+=`<rect x="${x}" y="${y}" width="${w}" height="${stepH}" rx="7" fill="${fill}" fill-opacity="${st.unavailable?.58:.88}" stroke="#fff" stroke-width="2"/>`;
+    const label=st.key==='baseline'?'Candidate pool':st.stage, rate=initial?Number(st.survivors)/initial:0;
+    body+=text(cx,y+27,label,{anchor:'middle',size:14,weight:700,fill:st.unavailable?C.ink:'#fff'})+text(cx,y+49,`${st.survivors} survivors · ${pct(rate)}`,{anchor:'middle',size:12,weight:700,fill:st.unavailable?C.mute:'#fff'});
+    if(i>0){const right=x+w+14;body+=text(right,y+24,st.unavailable?'N/A · gate unavailable':`eliminated ${st.eliminated||0}`,{size:11.5,fill:st.unavailable?C.mute:C.bad,weight:700});body+=text(right,y+43,st.unavailable?`carried forward ${st.survivors}`:`pending ${st.pending||0}`,{size:11,fill:C.mute});}
+  });
+  body+=text(cx,H-43,`Final strict survivors: ${f.final_survivors??0} / ${f.initial_candidates??0} (${pct(Number(f.final_rate||0))})`,{anchor:'middle',size:14,weight:700});
+  body+=text(cx,H-20,'Strict cumulative PASS: HOLD 및 candidate-level N/A는 생존으로 계산하지 않으며, 전체 layer가 N/A인 경우에만 직전 수를 이월한다.',{anchor:'middle',size:10.5,fill:C.mute});
+  return wrap(W,H,body,'검증층을 통과하며 축소되는 위임 후보 생존 퍼널');
 }
 
 export function figReviewer(t) {
@@ -281,7 +303,7 @@ export function figRegionConcept() {
   return wrap(W, H, b, '위임 가능 영역 개념도: 이상적 검토자와 실제 검토자');
 }
 
-const BUILDERS = { 1: figHeatmap, 2: figEstimators, 3: figRegret, 4: figReviewer, 5: figEpisodes, 6: figExternalValidationMatrix, 10: figFullBlueprint, 11: figResearchModel, 12: figDcvDesign, 13: figRegionConcept };
+const BUILDERS = { 1: figHeatmap, 2: figEstimators, 3: figRegret, 4: figReviewer, 5: figEpisodes, 6: figExternalValidationMatrix, 7: figDelegationEvidenceFunnel, 10: figFullBlueprint, 11: figResearchModel, 12: figDcvDesign, 13: figRegionConcept };
 export function buildFigures(t) {
   return figureCatalog(t).map(g => { const svg = BUILDERS[g.n](t), m = /viewBox="0 0 (\d+) (\d+)"/.exec(svg); return { ...g, svg, width: +m[1], height: +m[2] }; });
 }

@@ -229,3 +229,11 @@
 - Added automatic thesis Figure 6 and report section 5.1 with full candidate survival/hold/fail paths.
 - Missing external or human evidence is represented as N/A, never as automatic failure.
 - Matrix refreshes after robust validation and after human recomputation.
+
+
+## v0.5.11 — Delegation Evidence Funnel
+- Added Figure 7 `fig7_delegation_evidence_funnel`.
+- Added strict cumulative survival funnel to thesis JSON (`survival_funnel`).
+- Added report §5.2 and Table 9C.
+- Added compact dashboard funnel below External Validation Matrix.
+- Whole-layer N/A is carried forward and explicitly labeled; HOLD/candidate-level N/A do not count as confirmed survival.

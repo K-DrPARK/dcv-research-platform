@@ -40,7 +40,7 @@ T('report on an empty project does not crash or print undefined', async () => {
 
 T('every figure is well-formed SVG with sensible size', async () => {
   const { env, pid } = await setup(); const figs = buildFigures(await buildThesisData(env, pid));
-  assert.equal(figs.length, 10);
+  assert.equal(figs.length, 11);
   for (const f of figs) { assert.ok(f.svg.startsWith('<svg') && f.svg.endsWith('</svg>'), f.file); assert.ok(!/undefined|NaN/.test(f.svg), `${f.file} has undefined/NaN`); assert.ok(f.width >= 600 && f.height >= 400); assert.equal((f.svg.match(/<svg/g) || []).length, 1); }
 });
 

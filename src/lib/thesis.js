@@ -184,6 +184,49 @@ export async function buildThesisData(env, projectId) {
     note: 'Historical/Synthetic use phase classifications. Adversarial/BIS/ECB are derived from stress-scenario subsets; when scenario-level classifications are absent, stored scenario metrics are checked against current loss/false-positive/false-negative/review-burden/recovery-time constraints when available. Human uses the latest current evidence_revision human_recompute validation.'
   };
 
+  // Figure 7: strict cumulative survival funnel. A candidate advances only when it PASSes
+  // every available gate up to that stage. If an entire layer is unavailable (all N/A),
+  // the previous survivor count is carried forward and the stage is explicitly marked N/A
+  // rather than being misrepresented as a pass/fail gate. HOLD/N/A within a partially
+  // observed layer are reported as pending and do not count as strict survivors.
+  const FUNNEL_ORDER = [
+    ['synthetic','Synthetic'],
+    ['historical','Historical'],
+    ['adversarial','Adversarial'],
+    ['bis','BIS'],
+    ['ecb','ECB'],
+    ['human','Human']
+  ];
+  let strictPool = cands.map(c=>c.id);
+  const funnelStages = [{ key:'baseline', stage:'Candidate pool', total:cands.length, survivors:cands.length, eliminated:0, pending:0, unavailable:false, survival_rate:cands.length?1:0 }];
+  for (const [key,label] of FUNNEL_ORDER) {
+    const layerCodes=cands.map(c=>(stageSnapshots.get(c.id)?.[key]?.code)||'MISSING');
+    const observedTotal=layerCodes.filter(x=>x!=='MISSING').length;
+    if(!observedTotal){
+      funnelStages.push({key,stage:label,total:strictPool.length,survivors:strictPool.length,eliminated:0,pending:strictPool.length,unavailable:true,observed:0,survival_rate:cands.length?strictPool.length/cands.length:0});
+      continue;
+    }
+    let survivors=0,eliminated=0,pending=0;
+    const next=[];
+    for(const id of strictPool){
+      const code=(stageSnapshots.get(id)?.[key]?.code)||'MISSING';
+      if(code==='PASS'){survivors++;next.push(id);}
+      else if(code==='FAIL')eliminated++;
+      else pending++;
+    }
+    strictPool=next;
+    funnelStages.push({key,stage:label,total:survivors+eliminated+pending,survivors,eliminated,pending,unavailable:false,observed:observedTotal,survival_rate:cands.length?survivors/cands.length:0,conditional_rate:(survivors+eliminated+pending)?survivors/(survivors+eliminated+pending):0});
+  }
+  const survival_funnel={
+    order:FUNNEL_ORDER.map(([key,stage])=>({key,stage})),
+    stages:funnelStages,
+    initial_candidates:cands.length,
+    final_survivors:strictPool.length,
+    final_rate:cands.length?strictPool.length/cands.length:0,
+    method:'STRICT_CUMULATIVE_PASS_v1',
+    note:'Strict cumulative funnel: a candidate advances only after PASS at every available preceding gate. HOLD and candidate-level N/A are pending, not survivors. If an entire validation layer is unavailable, the preceding count is carried forward and that layer is labelled N/A.'
+  };
+
   const phaseAgg = new Map();
   for (const r of runRows) { const e = phaseAgg.get(r.phase) || { phase: r.phase, runs: 0, episodes: 0, decisions: 0 }; e.runs++; e.episodes += Number(r.n) || 0; e.decisions += Number(r.decisions) || 0; phaseAgg.set(r.phase, e); }
   const phases = [...phaseAgg.values()].sort((a, b) => (a.phase < b.phase ? -1 : a.phase > b.phase ? 1 : 0));
@@ -242,7 +285,7 @@ export async function buildThesisData(env, projectId) {
     candidates: { total: cands.length, by_class: byClass, list: cands, dims, cells, estimators, finalists },
     selected: selected ? { ...selected, by_phase: selectedByPhase, inference:selectedInference } : null,
     approval: appr ? { decision: appr.decision, evidence_level: appr.evidence_level, automatic: !!appr.automatic, created_at: appr.created_at, basis: safeJson(appr.basis_json, {}) } : null,
-    simulation: { phases, scenarios, validations }, validation_matrix, reviewer, empirical: { readiness: empirical.status, complete_rows: empirical.complete_rows, target_rows: empirical.target_rows, profile: cal.profile?.version, coefficients: cal.coeff, calibration_uncertainty: cal.local_refit?.uncertainty || null, loss_calibration: cal.loss, parameters: params, panel, fdic, official_sources },
+    simulation: { phases, scenarios, validations }, validation_matrix, survival_funnel, reviewer, empirical: { readiness: empirical.status, complete_rows: empirical.complete_rows, target_rows: empirical.target_rows, profile: cal.profile?.version, coefficients: cal.coeff, calibration_uncertainty: cal.local_refit?.uncertainty || null, loss_calibration: cal.loss, parameters: params, panel, fdic, official_sources },
     reproducibility: { design_seed: hashString(`${projectId}:design`), protocol: protocol ? {version:protocol.version,hash:protocol.protocol_hash,frozen_at:protocol.frozen_at,status:protocol.status,definition_version:protocol.definition_version} : null, jobs, audit: { n: audit?.n ?? 0, first_at: audit?.first_at, last_at: audit?.last_at } }
   };
 }

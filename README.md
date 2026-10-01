@@ -1,4 +1,4 @@
-# DCV Research Platform v0.5.16
+# DCV Research Platform v0.5.17
 
 > Defense Rigor release: frozen protocol, simultaneous inference, calibration uncertainty propagation, participant-cluster human validation, and human scientific sign-off.
 
@@ -216,3 +216,9 @@ Each candidate is tracked across six independent evidence layers: `Synthetic`, `
 - Figure 7과 대시보드 funnel은 현재 프로젝트의 Project / Research Cycle / Evidence Revision / 생성시각을 명시합니다.
 - 보고서의 표 9C와 Figure 7은 `candidate_validation_matrix` 현재 snapshot의 실제 계산값만 사용하며 설명용 예시 survivor count를 삽입하지 않습니다.
 - 전체 validation layer가 N/A이면 이전 count를 이월하되 N/A로 명시하는 기존 원칙은 유지합니다.
+
+
+### v0.5.17 UI recovery
+- 청와대형 공공 연구포털 레이아웃, 강제 2행 제목/설명 구조
+- RESEARCH BRIEFING에 현재 연구상태 상시 표시
+- 마지막 프로젝트 직접조회 복구 경로로 연구내용 공백 상태 방지

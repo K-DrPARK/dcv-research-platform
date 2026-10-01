@@ -1,3 +1,24 @@
+# v0.5.1  D1 읽기(Rows read) 최적화
+
+일일 무료 한도(5,000,000 rows read) 초과 대응. **연구 결과(시뮬레이션 수치·시드·프로토콜 해시)는 바뀌지 않는다**
+(전후 결과 체크섬 동일, `scripts/profile-d1.mjs` 참고).
+
+- **인덱스 추가(0007)**: `simulation_runs`, `validations`, `measurements`, `approvals`, `reports`, `audit_log`, `reviewer_observations`,
+  `data_sources`, `raw_observations`, `jobs`에 `project_id` 기반 인덱스가 없어 매 요청이 모든 프로젝트의 행을 전체 스캔했다.
+  `/candidates`의 상관 서브쿼리는 후보 행마다 `validations` 전체를 스캔했다.
+- **완료 프로젝트 제외**: Cron(15분)이 `complete/report_ready` 프로젝트까지 매번 advance + 집계했다. 이제 건너뛴다.
+- **인간 검토 대기 폴링 제거**: 표본 게이트 미달 시 `fit_reviewer → advance_project(900초) → fit_reviewer …`가 무한 반복되며
+  매번 `reviewer_observations`와 전체 스캔 쿼리를 실행했다. 마지막 HOLD 이후 새 관측이 있을 때만 재시도(`projects.reviewer_hold_marker`).
+- **advance_project 폭주 억제**: `compute_candidate`가 끝날 때마다 무조건 enqueue → 대기 중 1건으로 병합(`enqueueOnce`).
+  검토자 관측 POST도 30초 지연 + 병합.
+- **compute_candidate 1건당 재조회 제거**: 프로토콜 무결성(후보 128행+에폭+계수 재구성), 정의, 보정계수, 에폭 패널을
+  isolate 메모(60초, 쓰기 시 즉시 무효화)로. 무결성은 동결 해시 1행 확인 + 10분 TTL 재검증.
+- **루프 쿼리 제거(N+1)**: `validateProject`, `computeRegretTable`, `finalizeRecompute`, `enqueueRobustValidation`, `enqueueRecompute`.
+- `claimJobs` 인덱스 순서 조회(대기열 전체 읽기+정렬 제거), 스테일 점검은 isolate당 2분 1회, 끝난 job 정리(하루 4회).
+- 주기 수집에서 새 행이 없으면 measure→seed 연쇄 생략, `seedCandidates`의 불필요한 프로토콜 재구성 제거.
+- 테스트 `tests/d1reads.test.mjs`(인덱스 회귀 가드 포함), 프로파일러 `scripts/profile-d1.mjs`.
+- **배포 주의**: 마이그레이션(0007)이 코드보다 먼저 적용되어야 한다(`deploy.yml`은 이미 그 순서).
+
 # v0.5.0 — Defense Rigor / International Review Hardening
 
 - 확증 분석 전 연구 프로토콜 SHA-256 동결 및 protocol drift 차단

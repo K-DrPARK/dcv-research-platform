@@ -1,6 +1,6 @@
 {
   "name": "dcv-research-platform",
-  "version": "0.5.22",
+  "version": "0.6.0",
   "private": true,
   "type": "module",
   "scripts": {
@@ -14,7 +14,11 @@
     "test": "node --test tests/*.test.mjs",
     "storage:verify": "node scripts/verify-storage-binding.mjs",
     "storage:snapshot": "node scripts/remote-project-guard.mjs snapshot",
-    "storage:check": "node scripts/remote-project-guard.mjs check"
+    "storage:check": "node scripts/remote-project-guard.mjs check",
+    "predev": "node scripts/prepare-lab-code.mjs",
+    "predeploy": "node scripts/prepare-lab-code.mjs",
+    "lab:bundle": "node scripts/prepare-lab-code.mjs",
+    "lab:test": "node --test tests/lab*.test.mjs"
   },
   "devDependencies": {
     "wrangler": "^4.41.0"

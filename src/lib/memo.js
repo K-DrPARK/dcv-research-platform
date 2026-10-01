@@ -15,10 +15,14 @@ function storeFor(env) {
 export async function cached(env, projectId, name, loader, ttlMs = DEFAULT_TTL_MS) {
   const s = storeFor(env); if (!s) return loader();
   const k = `${projectId}\u0000${name}`, hit = s.get(k), now = Date.now();
+  if(hit?.pending)return hit.pending;
   if (hit && hit.exp > now) return hit.value;
-  const value = await loader();
-  s.set(k, { value, exp: now + ttlMs });
-  return value;
+  // Coalesce concurrent requests and bound long-lived isolate memory.
+  if(s.size>=256){for(const [key,entry] of s)if(!entry.pending&&entry.exp<=now)s.delete(key);if(s.size>=256)s.delete(s.keys().next().value);}
+  const entry={exp:now+ttlMs,pending:null};
+  entry.pending=Promise.resolve().then(loader);s.set(k,entry);
+  try{const value=await entry.pending;if(s.get(k)===entry)s.set(k,{value,exp:Date.now()+ttlMs});return value;}
+  catch(error){if(s.get(k)===entry)s.delete(k);throw error;}
 }
 
 export function bust(env, projectId, name = null) {

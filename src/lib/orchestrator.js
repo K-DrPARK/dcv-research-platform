@@ -144,7 +144,7 @@ async function execute(env,job){
   switch(job.type){
     case 'seed_empirical_panel': return seedBundledEmpiricalPanel(env,id);
     case 'define_project': { const r=await defineProject(env,id); if(r.status==='CONFIRM') await enqueue(env,id,'collect_project',{},20); return r; }
-    case 'collect_project': { const r=await collectProject(env,id); if(Number(r.inserted||0)+Number(r.empiricalRows||0)>0) await registerEvidence(env,id,{kind:Number(r.empiricalRows||0)>0?'EMPIRICAL_EPISODE':'EXTERNAL_DATA',source:'scheduled_collector',detail:{inserted:r.inserted,empiricalRows:r.empiricalRows}}); if(Number(r.empiricalRows||0)>0) await enqueueOnce(env,id,'refit_empirical',{},22);
+    case 'collect_project': { const r=await collectProject(env,id,{dueOnly:!!payload.refresh}); if(Number(r.inserted||0)+Number(r.empiricalRows||0)>0) await registerEvidence(env,id,{kind:Number(r.empiricalRows||0)>0?'EMPIRICAL_EPISODE':'EXTERNAL_DATA',source:'scheduled_collector',detail:{inserted:r.inserted,empiricalRows:r.empiricalRows}}); if(Number(r.empiricalRows||0)>0) await enqueueOnce(env,id,'refit_empirical',{},22);
       // 주기 갱신(refresh)에서 새로 들어온 행이 없으면 측정 → 후보 재시드 연쇄를 건너뛴다. 최초 실행은 항상 진행.
       if(!(payload.refresh && Number(r.inserted||0)===0 && Number(r.empiricalRows||0)===0)) await enqueue(env,id,'measure_project',{},30);
       return r; }
@@ -172,11 +172,15 @@ export async function processJobs(env){
 
 export async function scheduleAll(env){
   // 완료된 프로젝트는 대상에서 제외(이전: 모든 auto_run 프로젝트에 15분마다 advance + 데이터소스 집계)
-  const ps=await all(env.DB,`SELECT id FROM projects WHERE auto_run=1 AND status NOT IN ('complete','report_ready')`);
+  // Two indexed EXISTS probes inside ONE bounded set query replace N per-project reads.
+  const ps=await all(env.DB,`SELECT p.id,
+    EXISTS(SELECT 1 FROM data_sources s WHERE s.project_id=p.id AND s.enabled=1 AND (s.last_fetched_at IS NULL OR datetime(s.last_fetched_at, '+' || s.cadence_minutes || ' minutes')<=datetime('now'))) due,
+    EXISTS(SELECT 1 FROM jobs j WHERE j.project_id=p.id AND j.type='collect_project' AND j.status IN ('queued','running')) collecting
+    FROM projects p WHERE p.auto_run=1 AND p.status NOT IN ('complete','report_ready')
+    ORDER BY p.updated_at,p.id LIMIT 4`);
   for(const p of ps){
     await enqueueOnce(env,p.id,'advance_project',{},99);
-    const due=await one(env.DB,`SELECT 1 x FROM data_sources WHERE project_id=? AND enabled=1 AND (last_fetched_at IS NULL OR datetime(last_fetched_at, '+' || cadence_minutes || ' minutes') <= datetime('now')) LIMIT 1`,[p.id]);
-    if(due && !(await jobExists(env,p.id,'collect_project'))) await enqueue(env,p.id,'collect_project',{refresh:true},25);
+    if(p.due&&!p.collecting)await enqueueOnce(env,p.id,'collect_project',{refresh:true},25);
   }
   // 끝난 job 정리는 하루 4회(UTC 0/6/12/18시 첫 Cron)만 — 전용 인덱스를 두면 매 job 상태 변경마다 쓰기가 늘어난다.
   { const t=new Date(); if(t.getUTCHours()%6===0 && t.getUTCMinutes()<15){ try{ await pruneJobs(env); }catch(_){} } }

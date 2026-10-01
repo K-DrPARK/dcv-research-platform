@@ -1,5 +1,5 @@
 import { all, run, audit } from './db.js';
-import { nowIso, uid, safeJson } from './util.js';
+import { nowIso, uid, safeJson,sha256Hex } from './util.js';
 import { importEmpiricalEpisodes } from './empirical.js';
 import { collectFdicSource } from './fdic.js';
 import { collectOfficialSource } from './official_sources.js';
@@ -21,8 +21,8 @@ function normalizeRows(source, body, contentType){
   return Array.isArray(arr)?arr:[arr ?? data];
 }
 
-export async function collectProject(env, projectId){
-  const sources=await all(env.DB, `SELECT * FROM data_sources WHERE project_id=? AND enabled=1`, [projectId]);
+export async function collectProject(env, projectId,{dueOnly=false}={}){
+  const sources=await all(env.DB, `SELECT * FROM data_sources WHERE project_id=? AND enabled=1 ${dueOnly?"AND (last_fetched_at IS NULL OR datetime(last_fetched_at, '+' || cadence_minutes || ' minutes') <= datetime('now'))":''} ORDER BY last_fetched_at,id LIMIT 2`, [projectId]);
   let inserted=0, empiricalRows=0, errors=[];
   for(const s of sources){
     try{
@@ -37,7 +37,7 @@ export async function collectProject(env, projectId){
         continue;
       }
       const headers=safeJson(s.headers_json,{});
-      const resp=await fetch(s.url,{method:s.method||'GET',headers});
+      const resp=await fetch(s.url,{method:s.method||'GET',headers,signal:AbortSignal.timeout(20000)});
       if(!resp.ok) throw new Error(`HTTP ${resp.status}`);
       const body=await resp.text();
       const rows=normalizeRows(s,body,resp.headers.get('content-type')||'');
@@ -51,17 +51,21 @@ export async function collectProject(env, projectId){
         })).filter(x=>x.episode_name);
         const ir=await importEmpiricalEpisodes(env,projectId,epRows); empiricalRows+=ir.inserted;
       } else {
-        const stmts=[];
+        const observations=[];
         for(const row of rows.slice(0,500)){
           const key=String(getPath(row,map.key_path)||map.key||s.name||'signal');
           const raw=getPath(row,map.value_path||'value');
           const num=Number(raw); const isNum=Number.isFinite(num);
           const observed=String(getPath(row,map.time_path)||nowIso());
-          stmts.push(env.DB.prepare(`INSERT INTO raw_observations(id,project_id,source_id,observed_at,ingested_at,key,value_num,value_text,payload_json,quality_json) VALUES(?,?,?,?,?,?,?,?,?,?)`).bind(
-            uid('obs'),projectId,s.id,observed,nowIso(),key,isNum?num:null,isNum?null:String(raw??''),JSON.stringify(row),JSON.stringify({http_status:resp.status})
-          ));
+          const contentHash=await sha256Hex({source_id:s.id,key,observed:map.time_path?getPath(row,map.time_path):null,row});
+          const payload=JSON.stringify(row);if(payload.length>32000)throw new Error('observation_payload_exceeds_32KB');
+          observations.push({id:uid('obs'),observed_at:observed,ingested_at:nowIso(),key,value_num:isNum?num:null,value_text:isNum?null:String(raw??''),payload_json:payload,quality_json:JSON.stringify({http_status:resp.status}),content_hash:contentHash});
         }
-        if(stmts.length){ await env.DB.batch(stmts); inserted+=stmts.length; }
+        if(observations.length){
+          // json_each inserts many rows with ONE SQL statement, with no per-row reads.
+          for(let i=0;i<observations.length;i+=25){const result=await run(env.DB,`INSERT OR IGNORE INTO raw_observations(id,project_id,source_id,observed_at,ingested_at,key,value_num,value_text,payload_json,quality_json,content_hash)
+            SELECT json_extract(value,'$.id'),?,?,json_extract(value,'$.observed_at'),json_extract(value,'$.ingested_at'),json_extract(value,'$.key'),json_extract(value,'$.value_num'),json_extract(value,'$.value_text'),json_extract(value,'$.payload_json'),json_extract(value,'$.quality_json'),json_extract(value,'$.content_hash') FROM json_each(?)`,[projectId,s.id,JSON.stringify(observations.slice(i,i+25))]);inserted+=Number(result.meta?.changes||0);}
+        }
       }
       await run(env.DB,`UPDATE data_sources SET last_fetched_at=?,last_status='ok' WHERE id=?`,[nowIso(),s.id]);
     }catch(e){

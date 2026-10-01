@@ -14,6 +14,7 @@ import { SOURCE_PRESETS } from './lib/source_presets.js';
 import { resolveFdicLinks, confirmFdicLink, fdicStatus, enableFdicConnectors, buildFdicReverificationRankings, getFdicReverificationRankings, getFdicReverificationWorkbench, saveFdicReverificationReview, attachFdicReviewEvidenceRevision } from './lib/fdic.js';
 import { OFFICIAL_CONNECTORS, enableOfficialConnector, officialSourceStatus } from './lib/official_sources.js';
 import { getValidationMatrix, refreshValidationMatrix } from './lib/validation_matrix.js';
+import {labApi,scheduleLab} from './lib/lab.js';
 
 async function bodyJson(request){ try{return await request.json();}catch{return {};} }
 function pathParts(url){ return new URL(url).pathname.split('/').filter(Boolean); }
@@ -76,6 +77,10 @@ async function api(request,env){
 
   if(parts[0]==='api' && parts[1]==='projects' && parts[2]){
     const projectId=parts[2];
+    if(parts[3]==='lab'){
+      try{return await labApi(request,env,projectId,parts);}
+      catch(e){return json({error:String(e.message||e)},/project_not_found/.test(String(e))?404:400);}
+    }
     if(parts.length===3 && method==='GET'){
       const p=await one(env.DB,`SELECT * FROM projects WHERE id=?`,[projectId]); if(!p)return json({error:'not_found'},404);
       const def=await one(env.DB,`SELECT status,version,gate_json,content_json,ai_note,created_at FROM definitions WHERE project_id=? ORDER BY version DESC LIMIT 1`,[projectId]);
@@ -207,7 +212,7 @@ export default {
     if(url.pathname.startsWith('/api/')) return api(request,env);
     return env.ASSETS.fetch(request);
   },
-  async scheduled(controller,env,ctx){ ctx.waitUntil(scheduleAll(env)); },
+  async scheduled(controller,env,ctx){ ctx.waitUntil(Promise.allSettled([scheduleAll(env),scheduleLab(env)])); },
   async queue(batch,env,ctx){
     for(const message of batch.messages){
       try{ await processJobs(env); message.ack(); }

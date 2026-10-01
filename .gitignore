@@ -3,3 +3,7 @@ node_modules/
 .dev.vars
 .env
 .DS_Store
+
+.npm-cache/
+.deploy-preview/
+test-results.txt

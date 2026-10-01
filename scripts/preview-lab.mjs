@@ -1,0 +1,14 @@
+import http from 'node:http';
+import fs from 'node:fs';
+import path from 'node:path';
+import worker from '../src/index.js';
+import {makeDb} from '../tests/helpers/d1shim.mjs';
+import {seedProject} from '../tests/helpers/seed.mjs';
+import {createLabCampaign} from '../src/lib/lab.js';
+import {LAB_ROLES} from '../src/lib/lab_policy.js';
+const DB=makeDb(),pid=await seedProject(DB,{candidates:24,reviewer:35,episodes:12});
+const env={DB,APP_NAME:'DCV Research Platform',ASSETS:{fetch:async request=>{const p=new URL(request.url).pathname;const file=path.resolve('public','.'+(p==='/'?'/index.html':p));if(!file.startsWith(path.resolve('public')+path.sep))return new Response('',{status:403});try{return new Response(fs.readFileSync(file),{headers:{'content-type':file.endsWith('.js')?'text/javascript':file.endsWith('.css')?'text/css':'text/html'}});}catch{return new Response('',{status:404});}}}};
+const campaign=await createLabCampaign(env,pid,{title:'LOCAL SOFTWARE VERIFICATION — ten-role research lab'});
+DB.raw.prepare("UPDATE lab_campaigns SET status='paused',cursor=10,completed_tasks=10 WHERE id=?").run(campaign.id);
+for(let seq=0;seq<10;seq++)DB.raw.prepare(`INSERT INTO lab_tasks(campaign_id,seq,day,role_id,phase,status,summary,completed_at) VALUES(?,?,1,?,'protocol_and_gap','done',?,?) ON CONFLICT(campaign_id,seq) DO UPDATE SET status='done',summary=excluded.summary,completed_at=excluded.completed_at`).run(campaign.id,seq,LAB_ROLES[seq].id,'Local deterministic software verification fixture. This is not an actual research finding.',new Date().toISOString());
+http.createServer(async(req,res)=>{try{let body='';for await(const c of req)body+=c;const request=new Request('http://127.0.0.1:8790'+req.url,{method:req.method,headers:req.headers,...(body?{body}: {})});const response=await worker.fetch(request,env,{waitUntil(){}});res.writeHead(response.status,Object.fromEntries(response.headers));res.end(Buffer.from(await response.arrayBuffer()));}catch(e){res.writeHead(500);res.end(e.stack);}}).listen(8790,'127.0.0.1',()=>console.log('Local deterministic LAB verification at http://127.0.0.1:8790'));

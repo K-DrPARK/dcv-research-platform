@@ -30,6 +30,7 @@ export async function readLabSnapshot(env,campaign,{force=false}={}){
  snapshot.protocol={hash:snapshot.protocol.protocol_hash,content:safeJson(snapshot.protocol.protocol_json)};
  snapshot.runs=snapshot.runs.map(r=>({...r,result:safeJson(r.result_json),result_json:undefined}));
  snapshot.diagnostics=diagnoseSnapshot(snapshot);
+ snapshot.data_digest=await sha256Hex({project:{id:p.id,cycle,revision:rev},config:snapshot.config,candidates:snapshot.candidates,episodes:snapshot.episodes,human:snapshot.human,protocol:snapshot.protocol,validation:snapshot.validation,runs:snapshot.runs});
  snapshot.digest=await sha256Hex(JSON.stringify(snapshot));
  const serialized=JSON.stringify(snapshot);
  if(new TextEncoder().encode(serialized).length>1_500_000)throw new Error('evidence_snapshot_too_large: narrow the project or export offline');

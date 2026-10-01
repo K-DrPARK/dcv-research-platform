@@ -177,6 +177,9 @@ export async function scheduleAll(env){
     EXISTS(SELECT 1 FROM data_sources s WHERE s.project_id=p.id AND s.enabled=1 AND (s.last_fetched_at IS NULL OR datetime(s.last_fetched_at, '+' || s.cadence_minutes || ' minutes')<=datetime('now'))) due,
     EXISTS(SELECT 1 FROM jobs j WHERE j.project_id=p.id AND j.type='collect_project' AND j.status IN ('queued','running')) collecting
     FROM projects p WHERE p.auto_run=1 AND p.status NOT IN ('complete','report_ready')
+    AND (NOT EXISTS(SELECT 1 FROM jobs a WHERE a.project_id=p.id AND a.type='advance_project' AND a.status IN ('queued','running'))
+      OR (NOT EXISTS(SELECT 1 FROM jobs b WHERE b.project_id=p.id AND b.type='collect_project' AND b.status IN ('queued','running'))
+        AND EXISTS(SELECT 1 FROM data_sources d WHERE d.project_id=p.id AND d.enabled=1 AND (d.last_fetched_at IS NULL OR datetime(d.last_fetched_at, '+' || d.cadence_minutes || ' minutes')<=datetime('now')))))
     ORDER BY p.updated_at,p.id LIMIT 4`);
   for(const p of ps){
     await enqueueOnce(env,p.id,'advance_project',{},99);

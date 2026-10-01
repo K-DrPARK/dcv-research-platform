@@ -8,7 +8,7 @@ import {buildLabPackage,labReadiness} from './lab_package.js';
 
 const MAX_ATTEMPTS=3,LEASE_MS=180000;
 const safeConfig=campaign=>safeJson(campaign.config_json);
-const nextTime=(c,cursor)=>new Date(Date.parse(c.starts_at)+(Date.parse(c.deadline_at)-Date.parse(c.starts_at))*cursor/c.total_tasks).toISOString();
+const nextTime=(c,cursor)=>new Date(Date.parse(c.starts_at)+(Date.parse(c.deadline_at)-900000-Date.parse(c.starts_at))*cursor/c.total_tasks).toISOString();
 async function writeBatches(db,statements){for(let i=0;i<statements.length;i+=40)await db.batch(statements.slice(i,i+40));}
 export async function createLabCampaign(env,projectId,input={}){
  const p=await one(env.DB,'SELECT id,name FROM projects WHERE id=?',[projectId]);if(!p)throw new Error('project_not_found');
@@ -33,9 +33,10 @@ async function taskInputs(env,c){
   env.DB.prepare('SELECT * FROM lab_sources WHERE campaign_id=? ORDER BY doi LIMIT 120').bind(c.id),
   env.DB.prepare('SELECT section,markdown,evidence_signature,task_seq FROM lab_documents WHERE campaign_id=? ORDER BY section').bind(c.id),
   env.DB.prepare('SELECT * FROM lab_journals WHERE campaign_id=? ORDER BY journal,metric_year').bind(c.id),
-  env.DB.prepare(`SELECT role_id,summary,output_json FROM lab_tasks WHERE campaign_id=? AND status='done' AND seq<? ORDER BY seq DESC LIMIT 10`).bind(c.id,c.cursor)
+  env.DB.prepare(`SELECT role_id,summary,output_json FROM lab_tasks WHERE campaign_id=? AND status='done' AND seq<? ORDER BY seq DESC LIMIT 10`).bind(c.id,c.cursor),
+  env.DB.prepare('SELECT * FROM lab_replication_reviews WHERE campaign_id=?').bind(c.id)
  ]);
- return {sources:results[0].results||[],documents:results[1].results||[],journals:results[2].results||[],reviews:results[3].results||[]};
+ return {sources:results[0].results||[],documents:results[1].results||[],journals:results[2].results||[],reviews:results[3].results||[],replication:results[4].results?.[0]||null};
 }
 async function inferLabTask(env,c,t,snapshot,inputs){
  if(!env.AI)throw new Error('Workers AI binding unavailable');
@@ -64,11 +65,11 @@ async function inferLabTask(env,c,t,snapshot,inputs){
 export async function persistLabPackage(env,c,snapshot,inputs,leaseToken){
  const current=await one(env.DB,'SELECT status,lease_token FROM lab_campaigns WHERE id=?',[c.id]);
  if(current?.lease_token!==leaseToken||current.status==='paused')return {status:'lease_lost'};
- const built=await buildLabPackage(c,snapshot,inputs.documents,inputs.sources,inputs.journals,inputs.reviews),id=uid('labpkg'),now=nowIso();
- const statements=[env.DB.prepare(`INSERT INTO lab_packages(id,campaign_id,status,manifest_json,size_bytes,sha256,created_at) VALUES(?,?,?,?,?,?,?)`).bind(id,c.id,built.manifest.readiness.status,JSON.stringify(built.manifest),built.bytes.length,built.sha256,now)];
- for(let pos=0,no=0;pos<built.bytes.length;pos+=500000,no++)statements.push(env.DB.prepare('INSERT INTO lab_package_chunks(package_id,chunk_no,bytes) VALUES(?,?,?)').bind(id,no,built.bytes.slice(pos,pos+500000).buffer));
+ const built=await buildLabPackage(c,snapshot,inputs.documents,inputs.sources,inputs.journals,inputs.reviews,inputs.replication),id=uid('labpkg'),now=nowIso();
+ const statements=[env.DB.prepare(`INSERT INTO lab_packages(id,campaign_id,status,manifest_json,size_bytes,sha256,created_at) SELECT ?,?,?,?,?,?,? WHERE EXISTS(SELECT 1 FROM lab_campaigns WHERE id=? AND lease_token=? AND status='active')`).bind(id,c.id,built.manifest.readiness.status,JSON.stringify(built.manifest),built.bytes.length,built.sha256,now,c.id,leaseToken)];
+ for(let pos=0,no=0;pos<built.bytes.length;pos+=500000,no++)statements.push(env.DB.prepare('INSERT INTO lab_package_chunks(package_id,chunk_no,bytes) SELECT ?,?,? WHERE EXISTS(SELECT 1 FROM lab_packages WHERE id=?)').bind(id,no,built.bytes.slice(pos,pos+500000).buffer,id));
  statements.push(env.DB.prepare(`UPDATE lab_campaigns SET package_id=?,package_revision=package_revision+1,status='completed',lease_token=NULL,lease_until=NULL,snapshot_json=?,snapshot_signature=?,snapshot_at=?,updated_at=? WHERE id=? AND lease_token=? AND status='active'`).bind(id,JSON.stringify(snapshot),snapshot.signature,snapshot.captured_at,now,c.id,leaseToken));
- await env.DB.batch(statements);bust(env,c.project_id,'lab:status');return {status:'completed',package_id:id,readiness:built.manifest.readiness.status};
+ const results=await env.DB.batch(statements);if(!results.at(-1)?.meta?.changes)return {status:'lease_lost'};bust(env,c.project_id,'lab:status');return {status:'completed',package_id:id,readiness:built.manifest.readiness.status};
 }
 
 export async function processLabTick(env){
@@ -80,9 +81,9 @@ export async function processLabTick(env){
  AND status='active' AND (lease_until IS NULL OR lease_until<?) RETURNING *`,[token,until,now,now,now]);
  if(!c)return {status:'idle'};
  try{
-  const snapshot=await readLabSnapshot(env,c,{force:Date.now()>=Date.parse(c.deadline_at)});
+  const snapshot=await readLabSnapshot(env,c,{force:Date.now()+900000>=Date.parse(c.deadline_at)});
   await run(env.DB,'UPDATE lab_campaigns SET snapshot_json=?,snapshot_signature=?,snapshot_at=? WHERE id=? AND lease_token=?',[JSON.stringify(snapshot),snapshot.signature,snapshot.captured_at,c.id,token]);
-  if(c.cursor>=c.total_tasks||Date.now()>=Date.parse(c.deadline_at))return persistLabPackage(env,c,snapshot,await taskInputs(env,c),token);
+  if(c.cursor>=c.total_tasks||Date.now()+900000>=Date.parse(c.deadline_at))return persistLabPackage(env,c,snapshot,await taskInputs(env,c),token);
   const planned=makeLabPlan()[c.cursor];
   await run(env.DB,'INSERT OR IGNORE INTO lab_tasks(campaign_id,seq,day,role_id,phase) VALUES(?,?,?,?,?)',[c.id,planned.seq,planned.day,planned.role_id,planned.phase]);
   const task=await one(env.DB,`UPDATE lab_tasks SET status='running',attempts=attempts+1,started_at=?,error=NULL WHERE campaign_id=? AND seq=? AND status IN ('pending','retry','running') RETURNING *`,[now,c.id,c.cursor]);
@@ -101,7 +102,7 @@ export async function processLabTick(env){
   const at=nowIso(),cursor=c.cursor+1,statements=[];
   const putDoc=(section,markdown)=>statements.push(env.DB.prepare(`INSERT INTO lab_documents(campaign_id,section,markdown,evidence_signature,task_seq,updated_at)
    SELECT ?,?,?,?,?,? WHERE EXISTS(SELECT 1 FROM lab_campaigns WHERE id=? AND lease_token=? AND status='active')
-   ON CONFLICT(campaign_id,section) DO UPDATE SET markdown=excluded.markdown,evidence_signature=excluded.evidence_signature,task_seq=excluded.task_seq,updated_at=excluded.updated_at`).bind(c.id,section,markdown,snapshot.signature,task.seq,at,c.id,token));
+   ON CONFLICT(campaign_id,section) DO UPDATE SET markdown=excluded.markdown,evidence_signature=excluded.evidence_signature,task_seq=excluded.task_seq,updated_at=excluded.updated_at`).bind(c.id,section,markdown,snapshot.data_digest,task.seq,at,c.id,token));
   if(output.section&&output.markdown)putDoc(output.section,output.markdown);
   if(task.role_id==='leader')for(const key of ['cover_letter','title_page','highlights','appendices'])if(typeof output.documents[key]==='string'&&output.documents[key].trim())putDoc(key,output.documents[key].slice(0,18000));
   statements.push(env.DB.prepare(`UPDATE lab_tasks SET status='done',summary=?,output_json=?,completed_at=? WHERE campaign_id=? AND seq=? AND EXISTS(SELECT 1 FROM lab_campaigns WHERE id=? AND lease_token=? AND status='active')`).bind(output.summary,JSON.stringify(output),at,c.id,task.seq,c.id,token),
@@ -159,12 +160,18 @@ export async function getLabStatus(env,projectId){
 
 export async function labApi(request,env,projectId,parts){
  const method=request.method,action=parts[4]||'';
- if(method==='GET'&&!action){try{const status=await getLabStatus(env,projectId),etag='"'+(status.campaign?.updated_at||'empty')+'"';if(request.headers.get('if-none-match')===etag)return new Response(null,{status:304,headers:{etag,'cache-control':'private, no-cache'}});return json(status,200,{etag});}catch(e){if(/no such table/.test(String(e)))return json({error:'lab_migration_required',migration:'0017_research_lab.sql'},503);throw e;}}
+ if(method==='GET'&&!action){try{const status=await getLabStatus(env,projectId),c=status.campaign,etag='"'+(c?[c.status,c.updated_at,c.cursor,c.package_revision].join('|'):'empty')+'"';if(request.headers.get('if-none-match')===etag)return new Response(null,{status:304,headers:{etag,'cache-control':'private, no-cache'}});return json(status,200,{etag});}catch(e){if(/no such table/.test(String(e)))return json({error:'lab_migration_required',migration:'0017_research_lab.sql'},503);throw e;}}
  if(method==='POST'&&!action)return json(await createLabCampaign(env,projectId,await request.json()),201);
  const c=await one(env.DB,'SELECT * FROM lab_campaigns WHERE project_id=?',[projectId]);if(!c)return json({error:'lab_not_started'},404);
  if(method==='POST'&&['pause','resume'].includes(action)){
   if(c.status==='completed'&&action==='resume')return json({error:'campaign_completed'},409);
   await run(env.DB,'UPDATE lab_campaigns SET status=?,lease_token=NULL,lease_until=NULL,next_run_at=?,updated_at=? WHERE id=?',[action==='pause'?'paused':'active',nowIso(),nowIso(),c.id]);bust(env,projectId,'lab:status');return json({ok:true});
+ }
+ if(method==='POST'&&action==='rebuild'){
+  if(c.status!=='completed')return json({error:'package_rebuild_requires_completed_campaign'},409);
+  if(c.package_revision>=3)return json({error:'package_revision_limit_reached'},409);
+  await run(env.DB,"UPDATE lab_campaigns SET status='active',cursor=total_tasks,next_run_at=?,updated_at=? WHERE id=? AND status='completed'",[nowIso(),nowIso(),c.id]);
+  bust(env,projectId,'lab:status');return json({ok:true,message:'Package rebuild scheduled; existing download remains available until replacement'});
  }
  if(method==='PUT'&&action==='config'){
   const input=await request.json(),config=normalizeConfig({...safeConfig(c),...input});
@@ -179,7 +186,15 @@ export async function labApi(request,env,projectId,parts){
  if(method==='GET'&&action==='documents')return json({documents:await all(env.DB,'SELECT section,markdown,evidence_signature,task_seq,updated_at FROM lab_documents WHERE campaign_id=? ORDER BY section',[c.id])});
  if(method==='GET'&&action==='review'){
   if(!c.snapshot_json)return json({error:'evidence_not_captured'},409);
-  const inputs=await taskInputs(env,c);return json(labReadiness(c,safeJson(c.snapshot_json),inputs.documents,inputs.sources,inputs.journals,inputs.reviews));
+  const inputs=await taskInputs(env,c),s=safeJson(c.snapshot_json);return json({...labReadiness(c,s,inputs.documents,inputs.sources,inputs.journals,inputs.reviews,inputs.replication),data_digest:s.data_digest,simulation_runs:s.runs.length});
+ }
+ if(method==='POST'&&action==='replication'){
+  const input=await request.json(),s=safeJson(c.snapshot_json),checks=input.checks||{};
+  if(!s.data_digest||input.data_digest!==s.data_digest)throw new Error('Replication report must match current evidence data digest');
+  if(checks.full_seed_replay!==true||!Number.isInteger(checks.replayed_runs)||checks.replayed_runs<s.runs.length||!s.runs.length||!Number.isFinite(checks.max_absolute_error)||checks.max_absolute_error<0||checks.max_absolute_error>1e-8||!/^([a-f0-9]{64})$/i.test(checks.log_sha256||''))throw new Error('Provide verified full seed replay counts, maximum error <= 1e-8 and SHA256 of the execution log');
+  if(!String(input.verified_by||'').trim()||new URL(input.report_url).protocol!=='https:')throw new Error('Human verifier and HTTPS execution report required');
+  await run(env.DB,`INSERT INTO lab_replication_reviews(campaign_id,data_digest,checks_json,report_url,verified_by,verified_at) VALUES(?,?,?,?,?,?) ON CONFLICT(campaign_id) DO UPDATE SET data_digest=excluded.data_digest,checks_json=excluded.checks_json,report_url=excluded.report_url,verified_by=excluded.verified_by,verified_at=excluded.verified_at`,[c.id,s.data_digest,JSON.stringify(checks),String(input.report_url).slice(0,2000),String(input.verified_by).slice(0,200),nowIso()]);
+  bust(env,projectId,'lab:status');return json({ok:true,verification:'Human-attested external full seed replay; not certified by AI'});
  }
  if(method==='GET'&&action==='download'){
   if(!c.package_id)return json({error:'package_not_ready',deadline_at:c.deadline_at},409);

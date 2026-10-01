@@ -54,6 +54,7 @@ export function validateLabOutput(output,role,sources){
   if(!allowed.has(doi)&&!allowed.has(m[0].toLowerCase()))throw new Error('Unknown DOI in AI output');
  }
  if(role.id==='writer'&&(typeof output.markdown!=='string'||output.markdown.split(/\s+/).length<80))throw new Error('Writer section is incomplete');
+ if(role.id==='writer'&&/[가-힣]/.test(output.markdown))throw new Error('Manuscript sections must be English');
  return {summary:output.summary.slice(0,1800),findings:Array.isArray(output.findings)?output.findings.slice(0,12):[],
   blockers:Array.isArray(output.blockers)?output.blockers.slice(0,12).map(String):[],recommendations:Array.isArray(output.recommendations)?output.recommendations.slice(0,12).map(String):[],
   markdown:typeof output.markdown==='string'?output.markdown.slice(0,18000):'',documents:role.id==='leader'&&output.documents&&typeof output.documents==='object'?output.documents:{}};

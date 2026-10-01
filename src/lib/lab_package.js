@@ -7,7 +7,7 @@ import {nowIso,sha256Hex,safeJson} from './util.js';
 const label={abstract:'Abstract',introduction:'Introduction',related_work:'Related literature',methods:'Methods',results:'Results',discussion:'Discussion',conclusion:'Conclusion'};
 const table=(heads,rows)=>`| ${heads.join(' | ')} |\n| ${heads.map(()=>'---').join(' | ')} |\n${rows.map(r=>'| '+r.map(v=>String(v??'Not available').replace(/\|/g,'/').replace(/\n/g,' ')).join(' | ')+' |').join('\n')}`;
 const csv=rows=>{if(!rows.length)return '';const keys=Object.keys(rows[0]);const cell=v=>'"'+String(typeof v==='object'?JSON.stringify(v):v??'').replaceAll('"','""')+'"';return '\uFEFF'+[keys.map(cell).join(','),...rows.map(r=>keys.map(k=>cell(r[k])).join(','))].join('\n');};
-export function labReadiness(campaign,snapshot,documents,sources,journals,taskReviews=[]){
+export function labReadiness(campaign,snapshot,documents,sources,journals,taskReviews=[],replication=null){
  const config=safeJson(campaign.config_json),docs=new Map(documents.map(d=>[d.section,d]));
  const blockers=[...(snapshot.diagnostics?.blockers||[])];
  const journal=journalAssessment(journals,config.metric_years,config.target_journal);
@@ -17,15 +17,16 @@ export function labReadiness(campaign,snapshot,documents,sources,journals,taskRe
  if(!config.ethics_statement)blockers.push('Human-research ethics/consent statement not supplied');
  if(!config.funding||!config.conflicts)blockers.push('Author-confirmed funding and conflict declarations incomplete');
  if(sources.length<15)blockers.push('Fewer than 15 DOI-verified references');
- if((config.full_text_verified_dois||[]).length<10)blockers.push('Full-text support verification missing for key literature');
- for(const section of MANUSCRIPT_SECTIONS){const d=docs.get(section);if(!d?.markdown?.trim())blockers.push('Manuscript section missing: '+section);else if(d.evidence_signature!==snapshot.signature)blockers.push('Manuscript section uses superseded evidence: '+section);}
+ if(new Set((config.full_text_verified_dois||[]).map(d=>d.toLowerCase()).filter(d=>sources.some(s=>s.doi.toLowerCase()===d))).size<10)blockers.push('Full-text support verification missing for key literature');
+ for(const section of MANUSCRIPT_SECTIONS){const d=docs.get(section);if(!d?.markdown?.trim())blockers.push('Manuscript section missing: '+section);else if(d.evidence_signature!==snapshot.data_digest)blockers.push('Manuscript section uses superseded evidence: '+section);}
  for(const section of ['cover_letter','title_page','highlights','appendices'])if(!docs.get(section)?.markdown?.trim())blockers.push('Submission document missing: '+section);
  const words=MANUSCRIPT_SECTIONS.map(k=>docs.get(k)?.markdown||'').join(' ').split(/\s+/).filter(Boolean).length;
  if(words<3500)blockers.push('Main manuscript below 3500-word internal review floor');
- if(!snapshot.diagnostics?.seed_replay_verified)blockers.push('Complete simulation seed replay has not been independently verified');
+ const replayChecks=safeJson(replication?.checks_json),replayVerified=replication?.data_digest===snapshot.data_digest&&replayChecks.full_seed_replay===true;
+ if(!replayVerified)blockers.push('Complete simulation seed replay has not been independently verified');
  for(const review of taskReviews){const output=safeJson(review.output_json);if(output.blockers?.length)blockers.push(...output.blockers.map(b=>`${review.role_id}: ${b}`));}
  if(Number(campaign.failed_tasks||0)>0)blockers.push('Campaign contains exhausted task failures');
- return {status:blockers.length?'DRAFT_REQUIRES_REVIEW':'INTERNAL_REVIEW_COMPLETE',blockers:[...new Set(blockers)],word_count:words,journal,
+ return {status:blockers.length?'DRAFT_REQUIRES_REVIEW':'INTERNAL_REVIEW_COMPLETE',blockers:[...new Set(blockers)],word_count:words,journal,replication:replayVerified?replication:null,
   acceptance:'Not submitted; journal acceptance is an external editorial decision',human_signoff_required:true};
 }
 const REPRO_SCRIPT=`import fs from 'node:fs';
@@ -42,9 +43,9 @@ if(snapshot.episodes.length>=6){const fit=fitReducedForm(snapshot.episodes);asse
 const h=snapshot.human;if(Number(h.n)>0)assert.deepEqual(wilson(Number(h.appropriate||0),Number(h.n)),snapshot.diagnostics.human.appropriate_reliance,'Human interval mismatch');
 console.log(JSON.stringify({ok:true,scope:'hash, candidate totals, OLS and human Wilson interval',full_seed_replay:false},null,2));
 `;
-export async function buildLabPackage(campaign,snapshot,documents,sources,journals,reviews=[]){
+export async function buildLabPackage(campaign,snapshot,documents,sources,journals,reviews=[],replication=null){
  const config=safeJson(campaign.config_json),docs=new Map(documents.map(d=>[d.section,d.markdown]));
- const readiness=labReadiness(campaign,snapshot,documents,sources,journals,reviews);
+ const readiness=labReadiness(campaign,snapshot,documents,sources,journals,reviews,replication);
  const title=campaign.title,notice=`Package status: ${readiness.status}. Generated ${nowIso()}.\n\nThis is an AI-assisted research draft. Real authors must verify every claim, citation, ethics declaration and journal requirement before submission. Journal acceptance has not been obtained.\n\n`;
  const references=sources.map(s=>`${(safeJson(s.authors_json,[])||s.authors||[]).join(', ')} (${s.published_year||'n.d.'}). ${s.title}. ${s.journal||''}. https://doi.org/${s.doi}`).join('\n\n');
  const replaceCitations=md=>String(md).replace(/\[SRC:([^\]]+)\]/g,(_,doi)=>`(https://doi.org/${doi})`);
@@ -54,14 +55,15 @@ export async function buildLabPackage(campaign,snapshot,documents,sources,journa
  const images={candidate_classifications:{data:image,w:640,h:240}};
  const authors=config.authors.map(a=>`${a.name}, ${a.affiliation}${a.corresponding?' (Corresponding author: '+a.email+')':''}`).join('\n\n');
  const cover=docs.get('cover_letter')||`# Cover letter\n\nDear Editor,\n\nPlease review the accompanying draft entitled ${title}. The target journal and submission declarations require author verification.\n\n${authors||'Author details not supplied.'}`;
- const titlePage=docs.get('title_page')||`# ${title}\n\n${authors||'Author details not supplied.'}\n\n## Funding\n\n${config.funding||'Not supplied.'}\n\n## Conflicts of interest\n\n${config.conflicts||'Not supplied.'}\n\n## Research ethics\n\n${config.ethics_statement||'Not supplied.'}\n\n## AI assistance\n\nRole-specific AI agents assisted literature organization, analysis interpretation and drafting. Human authors remain responsible for the work.`;
+ // Author identity and declarations come exclusively from human-supplied settings.
+ const titlePage=`# ${title}\n\n${authors||'Author details not supplied.'}\n\n## Funding\n\n${config.funding||'Not supplied.'}\n\n## Conflicts of interest\n\n${config.conflicts||'Not supplied.'}\n\n## Research ethics\n\n${config.ethics_statement||'Not supplied.'}\n\n## AI assistance\n\nRole-specific AI agents assisted literature organization, analysis interpretation and drafting. Human authors remain responsible for the work.`;
  const highlights=docs.get('highlights')||'# Highlights\n\nHighlights are pending evidence-based editorial review.';
- const appendix=(docs.get('appendices')||'# Online supplementary appendices')+`\n\n## Evidence and verification boundaries\n\n${table(['Item','Value'],[['Project',snapshot.project.id],['Research cycle',snapshot.project.research_cycle],['Evidence revision',snapshot.project.evidence_revision],['Snapshot SHA256',snapshot.digest],['Historical episodes',snapshot.episodes.length],['Verified episodes',snapshot.diagnostics.verified_episodes],['Real human participants',snapshot.diagnostics.human.participants],['Full seed replay','Not independently verified']])}\n\n## Reproducibility diagnostics\n\n${JSON.stringify(snapshot.diagnostics,null,2)}\n\n## Journal verification\n\n${table(['Journal','Metric year','Edition','Category','Quartile','AIS','Verifier'],journals.map(r=>[r.journal,r.metric_year,r.edition,r.category,r.quartile,r.ais,r.verified_by]))}`;
+ const appendix=(docs.get('appendices')||'# Online supplementary appendices')+`\n\n## Evidence and verification boundaries\n\n${table(['Item','Value'],[['Project',snapshot.project.id],['Research cycle',snapshot.project.research_cycle],['Evidence revision',snapshot.project.evidence_revision],['Snapshot SHA256',snapshot.digest],['Historical episodes',snapshot.episodes.length],['Verified episodes',snapshot.diagnostics.verified_episodes],['Real human participants',snapshot.diagnostics.human.participants],['Full seed replay',readiness.replication?'Externally verified by '+readiness.replication.verified_by:'Not independently verified']])}\n\n## Reproducibility diagnostics\n\n${JSON.stringify(snapshot.diagnostics,null,2)}\n\n## Journal verification\n\n${table(['Journal','Metric year','Edition','Category','Quartile','AIS','Verifier'],journals.map(r=>[r.journal,r.metric_year,r.edition,r.category,r.quartile,r.ais,r.verified_by]))}`;
  const supplementFiles=[{name:'package.json',data:JSON.stringify({private:true,type:'module',scripts:{reproduce:'node reproduce.mjs'},engines:{node:'>=22'}},null,2)},
   {name:'reproduce.mjs',data:REPRO_SCRIPT},{name:'data/evidence_snapshot.json',data:JSON.stringify(snapshot)},
   {name:'data/candidates.csv',data:csv(snapshot.candidates)},{name:'data/crisis_episodes.csv',data:csv(snapshot.episodes)},
   {name:'data/simulation_run_summaries.json',data:JSON.stringify(snapshot.runs)},
-  {name:'data/literature.json',data:JSON.stringify(sources)},{name:'data/journal_evidence.json',data:JSON.stringify(journals)},
+  {name:'data/literature.json',data:JSON.stringify(sources)},{name:'data/journal_evidence.json',data:JSON.stringify(journals)},{name:'data/independent_replay_review.json',data:JSON.stringify(replication)},
   {name:'figures/candidate_classifications.png',data:image},...REPLICATION_CODE,
   {name:'README.md',data:'# Reproduction\n\nRun `npm run reproduce` using Node 22 or newer. No network or D1 connection is needed for snapshot hash, reduced-form OLS, candidate totals and human Wilson interval checks.\n\nThe supplied simulation engine and schema document the original model. Full seed replay is not certified by these aggregate checks. Reconstructed historical rows and model-conditional assumptions must be disclosed. Human records are exported only as aggregate counts; participant identifiers are excluded.\n'}];
  const supplement=await labZip(supplementFiles);

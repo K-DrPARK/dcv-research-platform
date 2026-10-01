@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import {makeDb} from './helpers/d1shim.mjs';
 import {seedProject} from './helpers/seed.mjs';
-import {createLabCampaign,processLabTick,getLabStatus,labApi} from '../src/lib/lab.js';
+import {createLabCampaign,processLabTick,getLabStatus,labApi,persistLabPackage} from '../src/lib/lab.js';
 import {makeLabPlan,normalizeConfig,validateJournalRow,journalAssessment,validateLabOutput,LAB_ROLES} from '../src/lib/lab_policy.js';
 import {readLabSnapshot} from '../src/lib/lab_evidence.js';
 import {collectProject} from '../src/lib/collectors.js';
@@ -79,4 +79,26 @@ test('unchanged scheduled data is deduplicated without per-row D1 read queries',
  const env=await makeEnv(),db=env.DB;db.raw.prepare(`INSERT INTO data_sources(id,project_id,name,kind,url,enabled,cadence_minutes,created_at) VALUES('source',?,'test','json','https://example.test',1,15,?)`).run(env.pid,new Date().toISOString());
  const old=globalThis.fetch;globalThis.fetch=async()=>new Response(JSON.stringify([{value:1,period:'2026'}]),{headers:{'content-type':'application/json'}});
  try{assert.equal((await collectProject(env,env.pid)).inserted,1);assert.equal((await collectProject(env,env.pid)).inserted,0);assert.equal(db.raw.prepare('SELECT COUNT(*) n FROM raw_observations').get().n,1);}finally{globalThis.fetch=old;}
+});
+
+test('semantic evidence digest survives timestamp-only updates',async()=>{
+ const env=await makeEnv();await createLabCampaign(env,env.pid);const c=env.DB.raw.prepare('SELECT * FROM lab_campaigns').get();const before=await readLabSnapshot(env,c);
+ env.DB.raw.prepare("UPDATE projects SET updated_at='2099-01-01T00:00:00Z' WHERE id=?").run(env.pid);
+ const after=await readLabSnapshot(env,c,{force:true});assert.equal(after.data_digest,before.data_digest);assert.notEqual(after.signature,before.signature);
+});
+test('deadline finalization runs within the final cron interval',async()=>{
+ const env=await makeEnv();await createLabCampaign(env,env.pid);env.DB.raw.prepare('UPDATE lab_campaigns SET deadline_at=?,next_run_at=?').run(new Date(Date.now()+300000).toISOString(),new Date(0).toISOString());
+ assert.equal((await processLabTick(env)).status,'completed');assert.equal(env.calls.length,0);
+});
+test('a lease revoked during package assembly cannot persist orphan chunks',async()=>{
+ const env=await makeEnv();await createLabCampaign(env,env.pid);env.DB.raw.prepare("UPDATE lab_campaigns SET lease_token='test-lease'").run();
+ const c=env.DB.raw.prepare('SELECT * FROM lab_campaigns').get(),snapshot=await readLabSnapshot(env,c),original=env.DB.batch;
+ env.DB.batch=async statements=>{env.DB.raw.prepare("UPDATE lab_campaigns SET status='paused',lease_token=NULL").run();return original(statements);};
+ const result=await persistLabPackage(env,c,snapshot,{documents:[],sources:[],journals:[],reviews:[]},'test-lease');assert.equal(result.status,'lease_lost');
+ assert.equal(env.DB.raw.prepare('SELECT COUNT(*) n FROM lab_packages').get().n,0);assert.equal(env.DB.raw.prepare('SELECT COUNT(*) n FROM lab_package_chunks').get().n,0);
+});
+test('status ETag returns 304 without reloading task history',async()=>{
+ const env=await makeEnv();await createLabCampaign(env,env.pid);const parts=['api','projects',env.pid,'lab'];
+ const response=await labApi(new Request('https://local/api'),env,env.pid,parts);const etag=response.headers.get('etag');assert.ok(etag);
+ assert.equal((await labApi(new Request('https://local/api',{headers:{'if-none-match':etag}}),env,env.pid,parts)).status,304);
 });

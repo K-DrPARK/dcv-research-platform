@@ -1,6 +1,11 @@
-# DCV Research Platform v0.5.6
+# DCV Research Platform v0.5.13
 
 > Defense Rigor release: frozen protocol, simultaneous inference, calibration uncertainty propagation, participant-cluster human validation, and human scientific sign-off.
+
+## v0.5.13 Validation/Regret UX clarity
+
+대시보드에서 G3/G5/G6의 의미를 분리해 표시합니다. External Validation Matrix/Funnel은 G3 완료 후 생성되고 G5 완료 시 Human 열까지 확정됩니다. `Robust Minimax Regret`은 Historical + Stress(Adversarial + BIS + ECB) 기준이며 Human Recompute는 별도 후보 재판정 단계로 표시됩니다. Regret 화면에는 현재 Cycle/Evidence Revision, 사용 시나리오 수, 마지막 갱신시각이 함께 표시됩니다.
+
 
 ## v0.5.6 Episode Reverification Workbench
 

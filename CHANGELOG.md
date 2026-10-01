@@ -1,5 +1,14 @@
 # Changelog
 
+## v0.5.13 — Validation/Regret UX clarity
+- Clarified Matrix/Funnel lifecycle: G3 Robust Validation creates the matrix/funnel; G5 Recompute confirms the Human layer; G6 is human scientific sign-off, not another statistical test.
+- Split the dashboard conceptually into `Robust Minimax Regret` and `Human Recompute` instead of implying that human trials directly recompute the regret metric.
+- Added regret provenance to project detail: basis, Research Cycle/Evidence Revision, last update time, and Historical/Adversarial/BIS/ECB scenario counts.
+- Explicitly labels Human Recompute as excluded from the minimax-regret metric; human-only evidence changes need not change the regret number.
+- Replaced ambiguous “후보 검증 후 자동 생성” placeholders with gate-specific guidance.
+- Added regression guards for the new explanatory labels.
+
+
 ## v0.5.6 — Episode Reverification Workbench
 - Added a full-screen Bootstrap Workbench for CRITICAL/HIGH FDIC discrepancy episodes.
 - Side-by-side view: thesis-panel values, FDIC CERT linkage, state-market HHI, Financials deposit dynamics, and SOD branch-level raw observations.

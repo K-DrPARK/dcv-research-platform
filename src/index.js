@@ -81,7 +81,18 @@ async function api(request,env){
       const def=await one(env.DB,`SELECT status,version,gate_json,content_json,ai_note,created_at FROM definitions WHERE project_id=? ORDER BY version DESC LIMIT 1`,[projectId]);
       const meas=await one(env.DB,`SELECT metrics_json,quality_json,measured_at FROM measurements WHERE project_id=? ORDER BY measured_at DESC LIMIT 1`,[projectId]);
       const cycle=Number(p.research_cycle||1),rev=Number(p.evidence_revision||0);
-      const counts=await one(env.DB,`SELECT COUNT(*) total,SUM(CASE WHEN status='confirmed_feasible' THEN 1 ELSE 0 END) feasible,SUM(CASE WHEN status IN ('infeasible','confirmation_failed') THEN 1 ELSE 0 END) infeasible,SUM(CASE WHEN evidence_status='UNRESOLVED' THEN 1 ELSE 0 END) unresolved,AVG(boundary_score) avg_boundary,MIN(max_regret) min_regret FROM design_candidates WHERE project_id=? AND research_cycle=?`,[projectId,cycle]);
+      const counts=await one(env.DB,`SELECT COUNT(*) total,SUM(CASE WHEN status='confirmed_feasible' THEN 1 ELSE 0 END) feasible,SUM(CASE WHEN status IN ('infeasible','confirmation_failed') THEN 1 ELSE 0 END) infeasible,SUM(CASE WHEN evidence_status='UNRESOLVED' THEN 1 ELSE 0 END) unresolved,AVG(boundary_score) avg_boundary,MIN(max_regret) min_regret,MAX(CASE WHEN max_regret IS NOT NULL THEN updated_at END) regret_updated_at FROM design_candidates WHERE project_id=? AND research_cycle=?`,[projectId,cycle]);
+      let regretMeta={basis:'Historical + Stress (Adversarial + BIS + ECB)',scenario_count:0,historical_scenarios:0,stress_scenarios:0,adversarial_scenarios:0,bis_scenarios:0,ecb_scenarios:0,last_updated_at:counts?.regret_updated_at||null,human_included:false};
+      if(counts?.min_regret!=null){
+        const rc=await one(env.DB,`SELECT id FROM design_candidates WHERE project_id=? AND research_cycle=? AND max_regret IS NOT NULL ORDER BY max_regret ASC,id LIMIT 1`,[projectId,cycle]);
+        if(rc?.id){
+          const rr=await all(env.DB,`SELECT phase,result_json,created_at FROM simulation_runs WHERE project_id=? AND candidate_id=? AND phase IN ('historical','stress') ORDER BY created_at DESC LIMIT 20`,[projectId,rc.id]);
+          const latest={}; for(const r of rr) if(!latest[r.phase]) latest[r.phase]=r;
+          const hs=safeJson(latest.historical?.result_json,{}).scenario_scores||{}, ss=safeJson(latest.stress?.result_json,{}).scenario_scores||{};
+          const sk=Object.keys(ss), hk=Object.keys(hs); const bis=sk.filter(k=>k.startsWith('official_bis_')).length,ecb=sk.filter(k=>k.startsWith('official_ecb_')).length;
+          regretMeta={...regretMeta,scenario_count:hk.length+sk.length,historical_scenarios:hk.length,stress_scenarios:sk.length,adversarial_scenarios:Math.max(0,sk.length-bis-ecb),bis_scenarios:bis,ecb_scenarios:ecb,last_updated_at:[counts?.regret_updated_at,latest.historical?.created_at,latest.stress?.created_at].filter(Boolean).sort().pop()||null};
+        }
+      }
       const app=await one(env.DB,`SELECT * FROM approvals WHERE project_id=? AND research_cycle=? AND evidence_revision=? AND stale_at IS NULL ORDER BY created_at DESC LIMIT 1`,[projectId,cycle,rev]);
       const staleApproval=await one(env.DB,`SELECT * FROM approvals WHERE project_id=? AND stale_at IS NOT NULL ORDER BY stale_at DESC LIMIT 1`,[projectId]);
       const reviewer=await one(env.DB,`SELECT model_json,version,created_at FROM reviewer_models WHERE project_id=? AND research_cycle=? AND evidence_revision=? ORDER BY version DESC LIMIT 1`,[projectId,cycle,rev]);
@@ -91,7 +102,7 @@ async function api(request,env){
       const empirical=await empiricalReadiness(env,projectId);
       const protocol=await latestProtocol(env,projectId);
       const gates=await approvalGates(env,projectId);
-      return json({project:p,definition:def?{...def,gate:safeJson(def.gate_json,{}),content:safeJson(def.content_json,{}),ai:safeJson(def.ai_note,{})}:null,measurement:meas?{...meas,metrics:safeJson(meas.metrics_json,{}),quality:safeJson(meas.quality_json,{})}:null,candidates:counts,approval:app?{...app,basis:safeJson(app.basis_json,{})}:null,stale_approval:staleApproval?{...staleApproval,basis:safeJson(staleApproval.basis_json,{})}:null,approval_gates:gates,reviewer:reviewer?{...reviewer,model:safeJson(reviewer.model_json,{})}:null,jobs,runs,scenarios,human_reviews:Number(p.reviewer_obs_count||0),empirical,protocol});
+      return json({project:p,definition:def?{...def,gate:safeJson(def.gate_json,{}),content:safeJson(def.content_json,{}),ai:safeJson(def.ai_note,{})}:null,measurement:meas?{...meas,metrics:safeJson(meas.metrics_json,{}),quality:safeJson(meas.quality_json,{})}:null,candidates:{...counts,regret_meta:regretMeta},approval:app?{...app,basis:safeJson(app.basis_json,{})}:null,stale_approval:staleApproval?{...staleApproval,basis:safeJson(staleApproval.basis_json,{})}:null,approval_gates:gates,reviewer:reviewer?{...reviewer,model:safeJson(reviewer.model_json,{})}:null,jobs,runs,scenarios,human_reviews:Number(p.reviewer_obs_count||0),empirical,protocol});
     }
     if(parts[3]==='run' && method==='POST'){ await run(env.DB,`UPDATE projects SET reviewer_hold_marker=NULL WHERE id=?`,[projectId]); const r=await advanceProject(env,projectId); return json({advance:r,transport:env.CDRS_QUEUE?'cloudflare-queue':'d1-fallback'}); }
     if(parts[3]==='sources' && method==='GET'){ return json({sources:await all(env.DB,`SELECT * FROM data_sources WHERE project_id=? ORDER BY created_at DESC`,[projectId])}); }

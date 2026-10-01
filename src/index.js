@@ -16,16 +16,47 @@ import { resolveFdicLinks, confirmFdicLink, fdicStatus, enableFdicConnectors, bu
 async function bodyJson(request){ try{return await request.json();}catch{return {};} }
 function pathParts(url){ return new URL(url).pathname.split('/').filter(Boolean); }
 
+async function tableColumns(db, table){
+  try{return new Set((await all(db,`PRAGMA table_info(${table})`)).map(x=>x.name));}catch{return new Set();}
+}
+async function storageIntegrity(env){
+  const pcols=await tableColumns(env.DB,'projects');
+  let projectCount=0,lineage=null;
+  try{projectCount=Number((await one(env.DB,`SELECT COUNT(*) n FROM projects`))?.n||0);}catch{}
+  try{lineage=(await one(env.DB,`SELECT value FROM platform_meta WHERE key='storage_lineage_id'`))?.value||null;}catch{}
+  return {project_count:projectCount,storage_lineage_id:lineage,projects_columns:[...pcols],schema:{candidate_count:pcols.has('candidate_count'),research_cycle:pcols.has('research_cycle'),evidence_revision:pcols.has('evidence_revision')}};
+}
+async function compatibleProjectList(env){
+  const pcols=await tableColumns(env.DB,'projects');
+  if(!pcols.has('id')) return [];
+  const rows=await all(env.DB,`SELECT * FROM projects ORDER BY created_at DESC`);
+  const ccounts={};
+  if(!pcols.has('candidate_count')){
+    try{for(const r of await all(env.DB,`SELECT project_id,COUNT(*) n FROM design_candidates GROUP BY project_id`))ccounts[r.project_id]=Number(r.n||0);}catch{}
+  }
+  const acounts={};
+  try{
+    const acols=await tableColumns(env.DB,'approvals');
+    let ar=[];
+    if(acols.has('research_cycle')&&acols.has('evidence_revision')&&acols.has('stale_at')&&pcols.has('research_cycle')&&pcols.has('evidence_revision')){
+      ar=await all(env.DB,`SELECT a.project_id,COUNT(*) n FROM approvals a JOIN projects p ON p.id=a.project_id WHERE a.research_cycle=p.research_cycle AND a.evidence_revision=p.evidence_revision AND a.stale_at IS NULL GROUP BY a.project_id`);
+    }else ar=await all(env.DB,`SELECT project_id,COUNT(*) n FROM approvals GROUP BY project_id`);
+    for(const r of ar)acounts[r.project_id]=Number(r.n||0);
+  }catch{}
+  return rows.map(r=>({...r,candidate_count:pcols.has('candidate_count')?Number(r.candidate_count||0):Number(ccounts[r.id]||0),reviewer_obs_count:pcols.has('reviewer_obs_count')?Number(r.reviewer_obs_count||0):Number(r.reviewer_obs_count||0),research_cycle:pcols.has('research_cycle')?Number(r.research_cycle||1):1,evidence_revision:pcols.has('evidence_revision')?Number(r.evidence_revision||0):0,approval_count:Number(acounts[r.id]||0)}));
+}
+
 async function api(request,env){
   const url=new URL(request.url), parts=pathParts(request.url), method=request.method.toUpperCase();
   if(url.pathname==='/api/health') return json({ok:true,app:env.APP_NAME||'DCV Research Platform',time:nowIso()});
   const auth=requireAdmin(request,env); if(auth) return auth;
 
   if(url.pathname==='/api/source-presets' && method==='GET') return json({presets:SOURCE_PRESETS});
+  if(url.pathname==='/api/system/integrity' && method==='GET') return json(await storageIntegrity(env));
 
   if(url.pathname==='/api/projects' && method==='GET'){
-    const rows=await all(env.DB,`SELECT p.*, (SELECT COUNT(*) FROM approvals a WHERE a.project_id=p.id AND a.research_cycle=p.research_cycle AND a.evidence_revision=p.evidence_revision AND a.stale_at IS NULL) approval_count FROM projects p ORDER BY created_at DESC`);
-    return json({projects:rows});
+    const rows=await compatibleProjectList(env);
+    return json({projects:rows,integrity:await storageIntegrity(env)});
   }
   if(url.pathname==='/api/projects' && method==='POST'){
     const b=await bodyJson(request), id=uid('project'), now=nowIso();

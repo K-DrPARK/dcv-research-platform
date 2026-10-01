@@ -200,3 +200,10 @@
 - Added CDRS candidate metadata columns
 - Added Cloudflare Queues compute transport with D1 durable fallback
 - Added unit tests and GitHub Actions test step
+
+## 0.5.7 — Project Persistence Guard
+- 기존 D1 프로젝트가 최신 schema 컬럼 부재 때문에 목록에서 사라져 보이지 않도록 `/api/projects`를 legacy-schema compatible 조회로 변경.
+- D1 `storage_lineage_id`를 도입하여 DB binding이 바뀌면 UI가 즉시 경고하고, 빈 목록을 삭제로 오인하지 않도록 함.
+- 마지막 선택 프로젝트를 localStorage에 기억하여 새 배포/새로고침 후에도 같은 프로젝트를 복원.
+- GitHub Actions에 `DCV_EXPECTED_D1_DATABASE_ID` 검증, migration 전후 프로젝트 수 감소 차단 guard 추가.
+- critical migration safety test: `projects` table DROP/DELETE 금지.

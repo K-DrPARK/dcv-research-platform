@@ -169,3 +169,6 @@ The approval donut now reflects six evidence gates, not a UI stage counter. Scie
 After FDIC Financials/SOD collection, the platform automatically builds a diagnostic reverification queue for CERT-linked episodes. It compares (1) thesis-panel concentration with FDIC state-market HHI and (2) panel peak_outflow with the maximum quarterly peak-to-trough FDIC deposit drawdown over episode year-1 through episode year. Each absolute gap is converted to an empirical percentile among comparable linked episodes; the mean of available percentiles is the discrepancy score. This is a workflow-priority diagnostic, not an outlier test and not an automatic data-correction rule.
 
 Use **External Data → FDIC Episode Connector → 재검증 우선순위** or call `POST /api/projects/:id/fdic/reverification`. Rankings are also available by GET and in the generated thesis report / `fdic_reverification.csv`.
+
+### 기존 연구프로젝트가 보이지 않을 때 (v0.5.7+)
+프로젝트가 빈 목록으로 보이더라도 데이터 삭제로 단정하지 마십시오. 플랫폼은 D1 저장소 lineage를 브라우저에 기억하고, binding 변경 또는 schema migration 누락을 감지해 상단 경고를 표시합니다. 먼저 `wrangler.jsonc`의 `database_id`가 기존 운영 D1과 같은지 확인하고 `npm run db:migrate:remote`를 실행하십시오. CI에서는 `DCV_EXPECTED_D1_DATABASE_ID` secret을 등록하면 다른 D1으로의 실수 배포가 차단됩니다. migration은 프로젝트 수를 줄이면 배포 전에 실패합니다.

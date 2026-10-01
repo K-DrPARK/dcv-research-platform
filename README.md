@@ -1,4 +1,4 @@
-# DCV Research Platform v0.5.18
+# DCV Research Platform v0.5.19
 
 > Defense Rigor release: frozen protocol, simultaneous inference, calibration uncertainty propagation, participant-cluster human validation, and human scientific sign-off.
 
@@ -226,3 +226,7 @@ Each candidate is tracked across six independent evidence layers: `Synthetic`, `
 
 ### v0.5.18 UI / D1 optimization
 Primary dashboard panels now use exact grid geometry, auxiliary data panels load after the critical research snapshot, and high-frequency D1 status/compute reads are batched or memoized. The included `scripts/profile-d1.mjs` can be used to re-check the read profile after deployment.
+
+
+### v0.5.19 refresh/report recovery
+Browser reload now waits until all project loaders are registered; the main analysis deck uses three independent columns, and the report modal defaults to rendered HTML with tables and figures instead of raw Markdown.

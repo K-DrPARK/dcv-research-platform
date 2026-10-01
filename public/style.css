@@ -635,3 +635,31 @@ body{background:var(--cw-bg)!important;color:var(--cw-ink)!important;overflow-x:
   #detailPanel>.row.g-3.mt-1{grid-template-columns:1fr!important}
   #empiricalSection,#dataSection,#dataSection + .col-12,#dataSection + .col-12 + .col-12{grid-column:1!important}
 }
+/* ======================================================================
+   v0.5.19 · Three-column analysis deck + independent card heights
+   - removes forced equal-height blank space
+   - keeps analytical cards aligned by top edge rather than stretched height
+   ====================================================================== */
+@media (min-width:1200px){
+  #computeSection{
+    display:grid!important;
+    grid-template-columns:minmax(0,1.08fr) minmax(0,.82fr) minmax(0,1.10fr)!important;
+    gap:18px!important;
+    align-items:start!important;
+  }
+  #computeSection>.col-12:first-child{grid-column:1!important;display:block!important}
+  #computeSection>.col-12:first-child>article{height:auto!important}
+  #computeSection>.col-12:nth-child(2){display:contents!important}
+  #computeSection>.col-12:nth-child(2)>.row{display:contents!important}
+  #computeSection>.col-12:nth-child(2)>.row>.col-12:first-child{grid-column:2!important;display:block!important}
+  #computeSection>.col-12:nth-child(2)>.row>.col-12:last-child{grid-column:3!important;display:block!important}
+  #validateSection,#recomputeSection{height:auto!important;min-height:0!important}
+  #computeSection .h-100{height:auto!important}
+  .chart-wrap{height:auto!important;min-height:330px!important}
+  #regionCanvas{height:292px!important;min-height:292px!important;flex:none!important}
+  .evidence-grid{grid-template-columns:1fr!important;grid-auto-rows:auto!important}
+  .evidence-item{min-height:72px!important}
+}
+/* Project/approval cards align at the top, but never stretch the shorter card just to match its neighbour. */
+#projectsSection{align-items:start!important}
+#projectsSection article,#projectsSection>#approvalSection,#projectsSection>#approvalSection>article{height:auto!important}

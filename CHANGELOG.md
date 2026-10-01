@@ -1,3 +1,14 @@
+## v0.5.19 — Refresh Recovery + Three-column Analysis + Report Visual Restore
+
+- Fixed browser F5/reload initialization order: project wrappers and auxiliary loaders are now registered before the first project load.
+- Stabilized feasible-region canvas with a post-layout redraw on initial load.
+- Replaced the stretched 2-column analysis row with three independent columns: Feasible Region / CDRS Evidence / Robust Regret + Human Recompute.
+- Removed forced equal-height stretching that created large blank areas under the left chart.
+- Restored rendered report preview: headings/tables render immediately as HTML and SVG figures hydrate asynchronously from the current thesis snapshot.
+- Report open explicitly triggers the renderer, avoiding a raw-Markdown preview regression.
+- Replaced enqueueOnce SELECT-then-INSERT with an atomic INSERT-WHERE-NOT-EXISTS path, eliminating one hot SELECT per enqueue attempt.
+- Same profiler workload: SELECTs 904 → 669 (-26.0% from v0.5.18; -51.0% from v0.5.17 baseline 1,365), estimated rows read 4,920 → 4,685.
+
 ## v0.5.18 — Precision Layout + D1 Read Optimization
 
 - Rebuilt the main dashboard on deterministic CSS grids: 4-column metrics, 1:1 Compute/Evidence, 1:1 Projects/Approval, and a 12-column detail grid.

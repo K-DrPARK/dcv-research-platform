@@ -35,9 +35,15 @@ export async function enqueue(env, projectId, type, payload={}, priority=100, de
 // compute_candidate 가 끝날 때마다 advance_project 를 무조건 enqueue 하던 것(후보 수만큼 중복)을 1건으로 합친다.
 // 'running' 은 중복으로 보지 않는다: 실행 중인 작업은 이미 상태를 읽었을 수 있어 뒤따르는 1건이 필요하다.
 export async function enqueueOnce(env, projectId, type, payload={}, priority=100, delaySeconds=0) {
-  const dup = await one(env.DB, `SELECT 1 x FROM jobs WHERE project_id IS ? AND type=? AND status='queued' LIMIT 1`, [projectId, type]);
-  if (dup) return null;
-  return enqueue(env, projectId, type, payload, priority, delaySeconds);
+  // Atomic insert-if-absent: avoids a SELECT round-trip for every enqueue attempt.
+  const t = new Date(Date.now()+delaySeconds*1000).toISOString(), id=uid('job'), now=nowIso();
+  const r = await run(env.DB, `INSERT INTO jobs(id,project_id,type,status,priority,payload_json,phase,run_after,created_at,updated_at)
+    SELECT ?,?,?, 'queued',?,?,?,?,?,?
+    WHERE NOT EXISTS (SELECT 1 FROM jobs WHERE project_id IS ? AND type=? AND status='queued')`,
+    [id,projectId,type,priority,JSON.stringify(payload),payload?.phase ?? null,t,now,now,projectId,type]);
+  if ((r.meta?.changes || 0) <= 0) return null;
+  await sendWake(env, [{ job_id:id, project_id:projectId, type }], delaySeconds);
+  return id;
 }
 
 let lastStaleSweep = 0;

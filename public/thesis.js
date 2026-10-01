@@ -130,12 +130,19 @@ function inject() {
   pre.insertAdjacentHTML('afterend', '<div id="reportHtml" class="report-html"></div>');
   const bar = modalEl.querySelector('.modal-header .ms-auto'); bar?.insertAdjacentHTML('afterbegin', '<button type="button" id="reportToggle" class="btn-ghost sm">원문 보기</button><button type="button" id="reportDocxBtn" class="btn-future sm" title="표·그림이 포함된 편집 가능한 Word 문서"><i class="bi bi-file-earmark-word"></i> Word</button><button type="button" id="reportMdzipBtn" class="btn-ghost sm" title="report.md + figures/ (ZIP)"><i class="bi bi-markdown"></i> MD+그림</button><button type="button" id="reportToolsBtn" class="btn-ghost sm"><i class="bi bi-mortarboard"></i> 더보기</button>');
   let raw = false; const view = $('#reportHtml');
+  // Render Markdown immediately so tables/headings are never replaced by the raw source view.
+  // Figures are hydrated asynchronously from the current thesis snapshot.
   const render = async () => {
-    const md = pre.textContent; if (!md || !D.current()) { view.innerHTML = ''; return; }
+    const md = pre.textContent;
+    if (!md) { view.innerHTML = ''; return; }
     if (raw) { pre.style.display = ''; view.style.display = 'none'; return; }
-    pre.style.display = 'none'; view.style.display = ''; view.innerHTML = '<span class="text-secondary small">그림을 만드는 중…</span>';
-    try { const { figs } = await loadThesis(); view.innerHTML = mdToHtml(md, { figure: figureResolver(figs) }); } catch (e) { view.innerHTML = mdToHtml(md); }
+    pre.style.display = 'none'; view.style.display = '';
+    view.innerHTML = mdToHtml(md);
+    if (!D.current()) return;
+    try { const { figs } = await loadThesis(); view.innerHTML = mdToHtml(md, { figure: figureResolver(figs) }); }
+    catch (e) { /* keep the already-rendered tables/text when figure hydration fails */ }
   };
+  window.DCVReportRender = render;
   $('#reportToggle').onclick = () => { raw = !raw; $('#reportToggle').textContent = raw ? '보기 좋게' : '원문 보기'; render(); };
   for (const [sel, act] of [['#reportDocxBtn', 'docx'], ['#reportMdzipBtn', 'mdzip']]) $(sel).onclick = () => runAction(act, {}, [...document.querySelectorAll('#reportModal .modal-header button')]);
   $('#reportToolsBtn').onclick = () => { D.modal('reportModal').hide(); setTimeout(openThesisModal, 350); };

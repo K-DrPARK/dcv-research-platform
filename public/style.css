@@ -696,3 +696,28 @@ body{background:var(--cw-bg)!important;color:var(--cw-ink)!important;overflow-x:
 .report-html figure[data-figure]{overflow:hidden}
 .report-html figure[data-figure] svg{display:block;width:100%;max-width:100%;height:auto;margin:0 auto}
 .report-html figure figcaption{font-size:.72rem;color:#b45309;margin-top:.35rem}
+
+/* v0.5.22: shared border boxes and title baselines. */
+@media (min-width:1200px){
+  #computeSection article,#projectsSection article{box-sizing:border-box!important;min-width:0!important}
+  #computeSection .panel-head{min-height:96px!important;flex:0 0 auto!important;align-items:center!important}
+  #recomputeSection,#approvalSection>article{height:auto!important;overflow:visible!important}
+  #recomputeSection .regret-panel{flex:0 0 auto!important}
+  #projectsSection .project-list{height:auto!important}
+}
+
+/* Bootstrap gutters add different top margins to flattened nested columns. */
+#stats>*,#projectsSection>*{margin-top:0!important}
+@media (min-width:1200px){
+  #computeSection .col-12{margin-top:0!important}
+  #computeSection .panel-head>div:first-child{align-self:stretch!important;grid-template-rows:48px 34px!important;align-items:start!important}
+  #computeSection .panel-head .panel-icon{align-self:start!important}
+}
+
+@media (min-width:1200px){
+  #computeSection .panel-head{position:relative;display:block!important;height:142px!important;min-height:142px!important}
+  #computeSection .panel-head>div:first-child{width:100%!important}
+  #computeSection .fig-quick{position:absolute;left:50px;bottom:14px;display:flex;gap:6px}
+  #computeSection #regionBadge{position:absolute;right:0;bottom:14px;white-space:nowrap}
+  #computeSection .fig-quick .btn-ghost{padding:6px 10px!important}
+}

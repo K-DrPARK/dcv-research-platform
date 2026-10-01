@@ -35,28 +35,32 @@ function syncDashboardHeights(){
     const left=document.querySelector('#computeSection>.col-12:first-child>article');
     const mid=document.getElementById('validateSection');
     const right=document.getElementById('recomputeSection');
-    if(left&&mid&&right){
-      left.style.height=mid.style.height=right.style.height='auto';
-      const target=Math.ceil(right.scrollHeight);
-      if(target>0){for(const el of [left,mid,right])el.style.setProperty('height',`${target}px`,'important');left.style.setProperty('overflow','hidden','important');mid.style.setProperty('overflow','auto','important');right.style.setProperty('overflow','visible','important');}
-    }
-    const project=document.querySelector('#projectsSection>.col-12:first-child>article');
-    const approval=document.querySelector('#approvalSection>article');
-    if(project&&approval){
-      project.style.height=approval.style.height='auto';
-      const target=Math.ceil(approval.scrollHeight);
-      if(target>0){for(const el of [project,approval])el.style.setProperty('height',`${target}px`,'important');project.style.setProperty('overflow','auto','important');approval.style.setProperty('overflow','visible','important');}
-    }
+    const matchReference=(reference,followers)=>{
+      if(!reference)return;
+      // Measure the natural border box, including padding and both borders.
+      // Keep the reference unconstrained to avoid resize feedback loops.
+      reference.style.removeProperty('height');
+      const target=reference.getBoundingClientRect().height;
+      if(target>0)for(const el of followers.filter(Boolean)){
+        el.style.setProperty('height',target+'px','important');
+        el.style.setProperty('overflow','auto','important');
+      }
+    };
+    matchReference(right,[left,mid]);
+    matchReference(document.querySelector('#approvalSection>article'),[
+      document.querySelector('#projectsSection>.col-12:first-child>article')
+    ]);
     drawRegion(candidates);
   });
 }
 function installDashboardHeightObserver(){
-  if(_layoutObserver)_layoutObserver.disconnect();
+  if(_layoutObserver)return;
   if(!('ResizeObserver' in window))return;
   _layoutObserver=new ResizeObserver(()=>syncDashboardHeights());
-  const right=document.getElementById('recomputeSection'),approval=document.querySelector('#approvalSection>article');
-  if(right)_layoutObserver.observe(right);
-  if(approval)_layoutObserver.observe(approval);
+  for(const el of [document.getElementById('recomputeSection'),document.querySelector('#approvalSection>article')]){
+    if(el)_layoutObserver.observe(el);
+  }
+  document.fonts?.ready.then(syncDashboardHeights);
 }
 window.addEventListener('resize',syncDashboardHeights,{passive:true});
 
@@ -66,7 +70,7 @@ $('#refreshBtn').onclick=load;$('#tokenBtn').onclick=()=>{ $('#tokenInput').valu
 $('#sourceForm').onsubmit=async e=>{e.preventDefault();if(!current)return;const fd=new FormData(e.target);await api(`/api/projects/${current}/sources`,{method:'POST',body:JSON.stringify({name:fd.get('name'),url:fd.get('url'),kind:fd.get('kind'),mapping:{rows_path:fd.get('rows_path'),value_path:fd.get('value_path')||'value'}})});e.target.reset();};async function showReport(regen=false){if(!current){alert('먼저 프로젝트를 선택하세요.');return}const st=$('#reportStatus'),btn=$('#reportRegenBtn');try{if(regen){btn.disabled=true;st.textContent='AI 요약 생성 중… (최대 30초)';const r=await api(`/api/projects/${current}/report`,{method:'POST',body:'{}'});$('#reportText').textContent=r.content_markdown||r.markdown;st.textContent=r.ai?._ai?.ok?`AI: ${r.ai._ai.model}`:'AI 실패 → 규칙 기반 요약';}else{const r=await api(`/api/projects/${current}/report`);$('#reportText').textContent=r.content_markdown;st.textContent='';}modal('reportModal').show();queueMicrotask(()=>window.DCVReportRender?.());}catch(e){if(regen)st.textContent=`오류: ${e.message}`;else if(confirm('보고서가 아직 없습니다. 지금 생성할까요?'))return showReport(true)}finally{btn.disabled=false}}
 $('#reportBtn').onclick=()=>showReport(false);$('#reportRegenBtn').onclick=()=>showReport(true);
 $('#trialBtn').onclick=()=>startTrial();function startTrial(){if(!current)return;const conf=[.55,.75,.92][Math.floor(Math.random()*3)],correct=Math.random()<.65,started=performance.now();$('#trial').innerHTML=`<div class="trial-card"><b>AI 권고 · Confidence ${(conf*100).toFixed(0)}%</b><p class="mb-2">권고를 수용하시겠습니까?</p><div class="trial-actions"><button class="btn-future" id="accept">권고 수용</button><button class="btn-ghost" id="override">인간 개입</button></div></div>`;const send=async accept=>{const ms=Math.round(performance.now()-started),ph=localStorage.getItem('dcv_participant')||crypto.randomUUID();localStorage.setItem('dcv_participant',ph);const rr=await api(`/api/projects/${current}/reviewer-observations`,{method:'POST',body:JSON.stringify({participant_hash:ph,ai_confidence:conf,ai_correct:correct,human_accept:accept,response_ms:ms,recovered:(!correct&&!accept),recovery_ms:(!correct&&!accept)?ms:null})});const rv=rr.revalidation;$('#trial').innerHTML=`<div class="trial-card">기록 완료 · AI는 <b>${correct?'정답':'오답'}</b>이었습니다.<br><small>${rv?`Evidence r${rv.evidence_revision} · ${String(rv.impact_from).toUpperCase()}부터 DCV 재검증`:''}</small></div>`;await openProject(current,false,{skipCandidates:true})};   // 관측은 후보 목록을 바꾸지 않으므로 후보 128행 재조회 생략
-$('#accept').onclick=()=>send(true);$('#override').onclick=()=>send(false)}$('#globalSearch').addEventListener('input',e=>renderProjects(e.target.value));document.addEventListener('keydown',e=>{if(e.key==='/'&&document.activeElement.tagName!=='INPUT'&&document.activeElement.tagName!=='TEXTAREA'){e.preventDefault();$('#globalSearch').focus()}});window.addEventListener('resize',()=>drawRegion(candidates));
+$('#accept').onclick=()=>send(true);$('#override').onclick=()=>send(false)}$('#globalSearch')?.addEventListener('input',e=>renderProjects(e.target.value));document.addEventListener('keydown',e=>{if(e.key==='/'&&document.activeElement.tagName!=='INPUT'&&document.activeElement.tagName!=='TEXTAREA'){const search=$('#globalSearch');if(search){e.preventDefault();search.focus()}}});window.addEventListener('resize',()=>drawRegion(candidates));
 if($('#scientificSignoffBtn'))$('#scientificSignoffBtn').onclick=async()=>{if(!current)return;const reviewer=prompt('학술 승인자/PI 이름 또는 역할을 입력하세요.','PI');if(!reviewer)return;const rationale=prompt('승인 근거 또는 심사 메모를 간단히 입력하세요.','프로토콜·강건성·인간검토 결과를 확인함')||'';try{const r=await api(`/api/projects/${current}/scientific-signoff`,{method:'POST',body:JSON.stringify({reviewer_name:reviewer,rationale})});alert(`학술 승인 완료: ${r.decision}`);await openProject(current);}catch(e){alert(`승인 실패: ${e.message}`)}};
 if($('#empiricalViewBtn'))$('#empiricalViewBtn').onclick=async()=>{if(!current)return;const d=await api(`/api/projects/${current}/empirical`);$('#empiricalDetails').classList.remove('d-none');$('#empiricalDetails').textContent=JSON.stringify({readiness:d.readiness,coefficients:d.coefficients,parameters:d.parameters},null,2);};
 if($('#empiricalSeedPanelBtn'))$('#empiricalSeedPanelBtn').onclick=async()=>{if(!current)return;if(!confirm('패키지에 포함된 81개 위기 사례 패널을 적재하고 OLS를 재보정할까요?'))return;try{const r=await api(`/api/projects/${current}/empirical/seed-panel`,{method:'POST',body:'{}'});$('#empiricalDetails').classList.remove('d-none');$('#empiricalDetails').textContent=JSON.stringify(r,null,2);await openProject(current);alert('81개 사례 적재 및 보정이 완료되었습니다.');}catch(e){alert(`적재 실패: ${e.message}`)}};

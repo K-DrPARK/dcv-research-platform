@@ -1,3 +1,13 @@
+# v0.5.3 — Incremental DCV Revalidation
+
+- Added evidence revisions and research cycles.
+- A new human-review trial invalidates the prior approval and re-runs VALIDATE → RECOMPUTE → APPROVE only.
+- New external/empirical data opens a new research cycle from MEASURE; scenario updates restart at COMPUTE; design/constraint/RQ changes restart at DEFINE.
+- Approval workflow now reports six evidence gates (Protocol, Compute, Robust Validation, Human Validation, Recompute, Scientific Sign-off) rather than the project stage index.
+- Added stale approval/report semantics and evidence snapshots for auditability.
+- Added external-source presets for FDIC, BIS, ECB, BOK ECOS, IMF FAS and World Bank Findex.
+- Stage aliases now display scientific_review as APPROVED and complete/report_ready as REPORT.
+
 # v0.5.2  D1 읽기 재점검 2차 + 큐 지연 전달 보정
 
 - **그림 M0(연구모형 전체 설계도) 겹침 수정**: 절 좌표가 서로 모순이어서 ⑦ 복구 규칙이 섹션 4 제목에 가려지고, 섹션 5·6 상자가

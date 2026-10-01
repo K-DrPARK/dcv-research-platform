@@ -10,6 +10,7 @@ import { approveProject } from './approve.js';
 import { generateReport } from './report.js';
 import { compareStudy } from './crosscase.js';
 import { refitEmpiricalCalibration, seedBundledEmpiricalPanel } from './empirical.js';
+import { approvalGates, registerEvidence } from './evidence.js';
 
 // phase 컬럼(마이그레이션 0007)과 (project_id,type,status,phase) 인덱스로 존재 여부만 확인한다.
 // 이전: 해당 프로젝트의 queued/running 행을 전부 읽어 JS 에서 payload_json 을 파싱.
@@ -38,14 +39,15 @@ export async function advanceProject(env,projectId){
   // 인간 검토자 표본을 기다리는 중(마지막 fit_reviewer 가 HOLD 였고 그 뒤 새 관측이 없음)이면,
   // 앞 단계(후보/시뮬레이션/검증) 점검을 반복할 필요가 없다. 마커는 모든 앞 단계가 끝난 뒤에만 기록된다.
   if(p.reviewer_hold_marker!==null && p.reviewer_hold_marker!==undefined){
-    const model=await one(env.DB,`SELECT 1 x FROM reviewer_models WHERE project_id=? LIMIT 1`,[projectId]);
+    const model=await one(env.DB,`SELECT 1 x FROM reviewer_models WHERE project_id=? AND research_cycle=? AND evidence_revision=? LIMIT 1`,[projectId,Number(p.research_cycle||1),Number(p.evidence_revision||0)]);
     if(!model){
       const latest=await one(env.DB,`SELECT created_at FROM reviewer_observations WHERE project_id=? ORDER BY created_at DESC LIMIT 1`,[projectId]);
       if((latest?.created_at??'')===p.reviewer_hold_marker) return {stage:'human_review',waiting:'no_new_reviewer_observations'};
     }
   }
 
-  const cand=await one(env.DB,`SELECT COUNT(*) total,SUM(CASE WHEN status='confirmed_feasible' THEN 1 ELSE 0 END) feasible,SUM(CASE WHEN status IN ('pending','unresolved','provisionally_feasible') THEN 1 ELSE 0 END) active FROM design_candidates WHERE project_id=?`,[projectId]);
+  const cycle=Number(p.research_cycle||1),rev=Number(p.evidence_revision||0);
+  const cand=await one(env.DB,`SELECT COUNT(*) total,SUM(CASE WHEN status='confirmed_feasible' THEN 1 ELSE 0 END) feasible,SUM(CASE WHEN status IN ('pending','unresolved','provisionally_feasible') THEN 1 ELSE 0 END) active FROM design_candidates WHERE project_id=? AND research_cycle=?`,[projectId,cycle]);
   const total=Number(cand?.total||0), feasible=Number(cand?.feasible||0), active=Number(cand?.active||0);
   if(!total){
     const inFlight=await one(env.DB,`SELECT COUNT(*) n FROM jobs WHERE project_id=? AND type IN ('seed_empirical_panel','define_project','collect_project','refit_empirical','measure_project','seed_candidates') AND status IN ('queued','running')`,[projectId]);
@@ -65,15 +67,17 @@ export async function advanceProject(env,projectId){
 
   // 이전: simulation_runs 를 phase 별로 3번, validations 를 3번 — 모두 project_id 인덱스가 없어 전체 스캔.
   // 이후: 커버링 인덱스로 GROUP BY 1회씩.
-  const runAgg=await all(env.DB,`SELECT phase,COUNT(DISTINCT candidate_id) n FROM simulation_runs WHERE project_id=? AND phase IN ('historical','stress','recompute') GROUP BY phase`,[projectId]);
+  const runAgg=await all(env.DB,`SELECT r.phase,COUNT(DISTINCT r.candidate_id) n FROM simulation_runs r JOIN design_candidates c ON c.id=r.candidate_id WHERE r.project_id=? AND c.research_cycle=? AND r.phase IN ('historical','stress') GROUP BY r.phase`,[projectId,cycle]);
   const rn=Object.fromEntries(runAgg.map(r=>[r.phase,Number(r.n||0)]));
+  const recomputeNow=await one(env.DB,`SELECT COUNT(DISTINCT r.candidate_id) n FROM simulation_runs r JOIN design_candidates c ON c.id=r.candidate_id WHERE r.project_id=? AND c.research_cycle=? AND r.phase='recompute' AND r.evidence_revision=?`,[projectId,cycle,rev]);
+  rn.recompute=Number(recomputeNow?.n||0);
   if((rn.historical||0)<feasible || (rn.stress||0)<feasible){
     if(!(await jobExists(env,projectId,'compute_candidate','historical')) && !(await jobExists(env,projectId,'compute_candidate','stress'))) await enqueueRobustValidation(env,projectId);
     await setStage(env,p,'validate');
     return {stage:'robust'};
   }
 
-  const valAgg=await all(env.DB,`SELECT validation_type t,status s,COUNT(*) c,COUNT(DISTINCT candidate_id) d FROM validations WHERE project_id=? AND validation_type IN ('robust','human_recompute') GROUP BY validation_type,status`,[projectId]);
+  const valAgg=await all(env.DB,`SELECT v.validation_type t,v.status s,COUNT(*) c,COUNT(DISTINCT v.candidate_id) d FROM validations v LEFT JOIN design_candidates dc ON dc.id=v.candidate_id WHERE v.project_id=? AND dc.research_cycle=? AND (v.validation_type='robust' OR (v.validation_type='human_recompute' AND v.evidence_revision=?)) GROUP BY v.validation_type,v.status`,[projectId,cycle,rev]);
   const robustRows=valAgg.filter(v=>v.t==='robust').reduce((a,v)=>a+Number(v.c||0),0);
   const robustConfirmed=Number(valAgg.find(v=>v.t==='robust'&&v.s==='CONFIRM')?.d||0);
   const humanRows=valAgg.filter(v=>v.t==='human_recompute').reduce((a,v)=>a+Number(v.c||0),0);
@@ -83,7 +87,7 @@ export async function advanceProject(env,projectId){
     return {stage:'validate'};
   }
 
-  const reviewer=await one(env.DB,`SELECT id FROM reviewer_models WHERE project_id=? ORDER BY version DESC LIMIT 1`,[projectId]);
+  const reviewer=await one(env.DB,`SELECT id FROM reviewer_models WHERE project_id=? AND research_cycle=? AND evidence_revision=? ORDER BY version DESC LIMIT 1`,[projectId,cycle,rev]);
   if(!reviewer){
     // 이전: 표본 게이트(참가자 30명, 정답/오답 각 60건)를 통과할 때까지 fit_reviewer ↔ advance_project 가
     //       (HOLD → 900초 뒤 advance → fit_reviewer ...) 무한 반복하며 매번 reviewer_observations 를 읽었다.
@@ -111,20 +115,21 @@ export async function advanceProject(env,projectId){
     return {stage:'recompute_finalize'};
   }
 
-  const approval=await one(env.DB,`SELECT id FROM approvals WHERE project_id=? ORDER BY created_at DESC LIMIT 1`,[projectId]);
+  const approval=await one(env.DB,`SELECT id FROM approvals WHERE project_id=? AND research_cycle=? AND evidence_revision=? AND stale_at IS NULL ORDER BY created_at DESC LIMIT 1`,[projectId,cycle,rev]);
   if(!approval){
     if(!(await jobExists(env,projectId,'approve_project'))) await enqueue(env,projectId,'approve_project',{},90);
     await setStage(env,p,'approved');
     return {stage:'approve'};
   }
 
-  const report=await one(env.DB,`SELECT id FROM reports WHERE project_id=? ORDER BY created_at DESC LIMIT 1`,[projectId]);
+  const report=await one(env.DB,`SELECT id FROM reports WHERE project_id=? AND research_cycle=? AND evidence_revision=? AND stale_at IS NULL ORDER BY created_at DESC LIMIT 1`,[projectId,cycle,rev]);
   if(!report){
     if(!(await jobExists(env,projectId,'generate_report'))) await enqueue(env,projectId,'generate_report',{},95);
     await setStage(env,p,'report');
     return {stage:'report'};
   }
-  return {stage:'complete'};
+  await run(env.DB,`UPDATE projects SET approval_stale=0,revalidation_from=NULL WHERE id=?`,[projectId]);
+  return {stage:'complete',gates:await approvalGates(env,projectId)};
 }
 
 async function execute(env,job){
@@ -132,7 +137,7 @@ async function execute(env,job){
   switch(job.type){
     case 'seed_empirical_panel': return seedBundledEmpiricalPanel(env,id);
     case 'define_project': { const r=await defineProject(env,id); if(r.status==='CONFIRM') await enqueue(env,id,'collect_project',{},20); return r; }
-    case 'collect_project': { const r=await collectProject(env,id); if(Number(r.empiricalRows||0)>0) await enqueue(env,id,'refit_empirical',{},22);
+    case 'collect_project': { const r=await collectProject(env,id); if(Number(r.inserted||0)+Number(r.empiricalRows||0)>0) await registerEvidence(env,id,{kind:Number(r.empiricalRows||0)>0?'EMPIRICAL_EPISODE':'EXTERNAL_DATA',source:'scheduled_collector',detail:{inserted:r.inserted,empiricalRows:r.empiricalRows}}); if(Number(r.empiricalRows||0)>0) await enqueueOnce(env,id,'refit_empirical',{},22);
       // 주기 갱신(refresh)에서 새로 들어온 행이 없으면 측정 → 후보 재시드 연쇄를 건너뛴다. 최초 실행은 항상 진행.
       if(!(payload.refresh && Number(r.inserted||0)===0 && Number(r.empiricalRows||0)===0)) await enqueue(env,id,'measure_project',{},30);
       return r; }

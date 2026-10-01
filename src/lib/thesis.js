@@ -28,15 +28,16 @@ export async function buildThesisData(env, projectId) {
   const cfg = await one(env.DB, `SELECT * FROM project_config WHERE project_id=?`, [projectId]) || {};
   const def = await one(env.DB, `SELECT version,content_json,gate_json,created_at FROM definitions WHERE project_id=? ORDER BY version DESC LIMIT 1`, [projectId]);
   const meas = await one(env.DB, `SELECT metrics_json,quality_json,measured_at FROM measurements WHERE project_id=? ORDER BY measured_at DESC LIMIT 1`, [projectId]);
-  const appr = await one(env.DB, `SELECT * FROM approvals WHERE project_id=? ORDER BY created_at DESC LIMIT 1`, [projectId]);
-  const rmodel = await one(env.DB, `SELECT model_json,version,created_at FROM reviewer_models WHERE project_id=? ORDER BY version DESC LIMIT 1`, [projectId]);
+  const cycle=Number(project.research_cycle||1),rev=Number(project.evidence_revision||0);
+  const appr = await one(env.DB, `SELECT * FROM approvals WHERE project_id=? AND research_cycle=? AND evidence_revision=? AND stale_at IS NULL ORDER BY created_at DESC LIMIT 1`, [projectId,cycle,rev]);
+  const rmodel = await one(env.DB, `SELECT model_json,version,created_at FROM reviewer_models WHERE project_id=? AND research_cycle=? AND evidence_revision=? ORDER BY version DESC LIMIT 1`, [projectId,cycle,rev]);
   const protocol = await latestProtocol(env, projectId);
 
-  const candRows = await all(env.DB, `SELECT c.*, ${CLASS_SQL} AS klass FROM design_candidates c WHERE c.project_id=?`, [projectId]);
+  const candRows = await all(env.DB, `SELECT c.*, ${CLASS_SQL} AS klass FROM design_candidates c WHERE c.project_id=? AND c.research_cycle=?`, [projectId,cycle]);
   const cands = candRows.map(c => ({ id: c.id, sigma: r4(c.sigma), tau: c.tau, alpha: r4(c.alpha), K: c.authority_k, d: c.delay_d, W: r4(c.recovery_w), m: r4(c.adjust_m), estimator: c.estimator || 'ema', status: c.status, evidence_status: c.evidence_status, klass: c.klass, boundary_score: r4(c.boundary_score), max_regret: r4(c.max_regret), objective_score: r4(c.objective_score) }));
 
   // simulation_runs 는 한 번만 읽는다(이전: 이 조회 + 단계별 집계 조회로 2회 스캔). decisions 는 단계별 집계용으로 함께 꺼낸다.
-  const runRows = await all(env.DB, `SELECT candidate_id,phase,n,loss_mean,loss_exceed_rate,fp_rate,fn_rate,review_burden,recovery_time,regret,created_at,COALESCE(json_extract(result_json,'$.decisions'),0) AS decisions FROM simulation_runs WHERE project_id=? ORDER BY created_at`, [projectId]);
+  const runRows = await all(env.DB, `SELECT r.candidate_id,r.phase,r.n,r.loss_mean,r.loss_exceed_rate,r.fp_rate,r.fn_rate,r.review_burden,r.recovery_time,r.regret,r.created_at,COALESCE(json_extract(r.result_json,'$.decisions'),0) AS decisions FROM simulation_runs r JOIN design_candidates c ON c.id=r.candidate_id WHERE r.project_id=? AND c.research_cycle=? ORDER BY r.created_at`, [projectId,cycle]);
   const best = new Map(), byCandPhase = new Map();
   for (const r of runRows) {
     byCandPhase.set(`${r.candidate_id}|${r.phase}`, r);
@@ -69,7 +70,7 @@ export async function buildThesisData(env, projectId) {
   const phaseAgg = new Map();
   for (const r of runRows) { const e = phaseAgg.get(r.phase) || { phase: r.phase, runs: 0, episodes: 0, decisions: 0 }; e.runs++; e.episodes += Number(r.n) || 0; e.decisions += Number(r.decisions) || 0; phaseAgg.set(r.phase, e); }
   const phases = [...phaseAgg.values()].sort((a, b) => (a.phase < b.phase ? -1 : a.phase > b.phase ? 1 : 0));
-  const validations = await all(env.DB, `SELECT validation_type, status, COUNT(*) n FROM validations WHERE project_id=? GROUP BY validation_type, status ORDER BY validation_type, status`, [projectId]);
+  const validations = await all(env.DB, `SELECT v.validation_type, v.status, COUNT(*) n FROM validations v LEFT JOIN design_candidates c ON c.id=v.candidate_id WHERE v.project_id=? AND (v.candidate_id IS NULL OR c.research_cycle=?) AND (v.validation_type!='human_recompute' OR v.evidence_revision=?) GROUP BY v.validation_type, v.status ORDER BY v.validation_type, v.status`, [projectId,cycle,rev]);
   const scenarios = await one(env.DB, `SELECT COUNT(*) total, SUM(CASE WHEN scenario_type='historical' THEN 1 ELSE 0 END) historical, SUM(CASE WHEN scenario_type='adversarial' THEN 1 ELSE 0 END) adversarial FROM scenarios WHERE project_id=?`, [projectId]);
 
   // 인간 검토자: reviewer_observations 를 한 번만 스캔한다(이전: 전체 집계 + 신뢰도별 집계로 2회 스캔).
@@ -115,7 +116,7 @@ export async function buildThesisData(env, projectId) {
   const content = safeJson(def?.content_json, {}), constraints = safeJson(cfg.constraints_json, {}), design = safeJson(cfg.design_json, {});
   return {
     generated_at: nowIso(), app_version: APP_VERSION,
-    project: { id: project.id, name: project.name, description: project.description, status: project.status, stage: project.current_stage, created_at: project.created_at },
+    project: { id: project.id, name: project.name, description: project.description, status: project.status, stage: project.current_stage, created_at: project.created_at, research_cycle:cycle, evidence_revision:rev, revalidation_from:project.revalidation_from, approval_stale:!!project.approval_stale, last_evidence_at:project.last_evidence_at },
     definition: { version: def?.version ?? null, research_question: content.research_question || cfg.research_question || '', content, gate: safeJson(def?.gate_json, {}) },
     constraints, design, measurement: { metrics: safeJson(meas?.metrics_json, {}), quality: safeJson(meas?.quality_json, {}), measured_at: meas?.measured_at || null },
     candidates: { total: cands.length, by_class: byClass, list: cands, dims, cells, estimators, finalists },

@@ -29,6 +29,7 @@ function clusterBootstrap(rows,B=300,seed=20260930){
 
 export async function fitReviewerModel(env,projectId){
   const rows=await all(env.DB,`SELECT * FROM reviewer_observations WHERE project_id=? ORDER BY created_at DESC LIMIT 10000`,[projectId]);
+  const p=await one(env.DB,`SELECT research_cycle,evidence_revision FROM projects WHERE id=?`,[projectId]);
   const def=await latestDefinition(env,projectId),v=def?.content?.validation||{};
   const minParticipants=Number(v.min_human_participants||30),minCorrect=Number(v.min_human_correct_trials||60),minWrong=Number(v.min_human_wrong_trials||60),B=Number(v.cluster_bootstrap_n||300);
   const participantN=new Set(rows.map(r=>String(r.participant_hash||'anon'))).size,correctN=rows.filter(r=>Number(r.ai_correct)===1).length,wrongN=rows.filter(r=>Number(r.ai_correct)===0).length;
@@ -41,7 +42,7 @@ export async function fitReviewerModel(env,projectId){
   }
   const point=metrics(rows),cluster=clusterBootstrap(rows,B,20260930),model={...point,participants:participantN,cluster_bootstrap:cluster,sample_gate:gate,unit_of_inference:'participant-cluster bootstrap; repeated trials are not treated as independent participants'};
   const ver=await one(env.DB,`SELECT COALESCE(MAX(version),0) v FROM reviewer_models WHERE project_id=?`,[projectId]);
-  const id=uid('reviewermodel'); await run(env.DB,`INSERT INTO reviewer_models(id,project_id,version,model_json,created_at) VALUES(?,?,?,?,?)`,[id,projectId,(ver?.v||0)+1,JSON.stringify(model),nowIso()]);
+  const id=uid('reviewermodel'); await run(env.DB,`INSERT INTO reviewer_models(id,project_id,version,model_json,created_at,research_cycle,evidence_revision) VALUES(?,?,?,?,?,?,?)`,[id,projectId,(ver?.v||0)+1,JSON.stringify(model),nowIso(),Number(p?.research_cycle||1),Number(p?.evidence_revision||0)]);
   bust(env,projectId,'reviewer:latest');
   await audit(env,projectId,'agent','reviewer.fit.complete','reviewer_model',id,model);
   await enqueue(env,projectId,'recompute_project',{},65);

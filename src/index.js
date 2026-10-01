@@ -9,6 +9,8 @@ import { aiJson } from './lib/ai.js';
 import { empiricalReadiness, ensureEmpiricalProfile, importEmpiricalEpisodes, refitEmpiricalCalibration, loadEmpiricalCalibration, seedBundledEmpiricalPanel } from './lib/empirical.js';
 import { scientificSignoff } from './lib/approve.js';
 import { latestProtocol } from './lib/rigor.js';
+import { registerEvidence, approvalGates } from './lib/evidence.js';
+import { SOURCE_PRESETS } from './lib/source_presets.js';
 
 async function bodyJson(request){ try{return await request.json();}catch{return {};} }
 function pathParts(url){ return new URL(url).pathname.split('/').filter(Boolean); }
@@ -18,8 +20,10 @@ async function api(request,env){
   if(url.pathname==='/api/health') return json({ok:true,app:env.APP_NAME||'DCV Research Platform',time:nowIso()});
   const auth=requireAdmin(request,env); if(auth) return auth;
 
+  if(url.pathname==='/api/source-presets' && method==='GET') return json({presets:SOURCE_PRESETS});
+
   if(url.pathname==='/api/projects' && method==='GET'){
-    const rows=await all(env.DB,`SELECT p.*, (SELECT COUNT(*) FROM approvals a WHERE a.project_id=p.id) approval_count FROM projects p ORDER BY created_at DESC`);
+    const rows=await all(env.DB,`SELECT p.*, (SELECT COUNT(*) FROM approvals a WHERE a.project_id=p.id AND a.research_cycle=p.research_cycle AND a.evidence_revision=p.evidence_revision AND a.stale_at IS NULL) approval_count FROM projects p ORDER BY created_at DESC`);
     return json({projects:rows});
   }
   if(url.pathname==='/api/projects' && method==='POST'){
@@ -42,15 +46,18 @@ async function api(request,env){
       const p=await one(env.DB,`SELECT * FROM projects WHERE id=?`,[projectId]); if(!p)return json({error:'not_found'},404);
       const def=await one(env.DB,`SELECT status,version,gate_json,content_json,ai_note,created_at FROM definitions WHERE project_id=? ORDER BY version DESC LIMIT 1`,[projectId]);
       const meas=await one(env.DB,`SELECT metrics_json,quality_json,measured_at FROM measurements WHERE project_id=? ORDER BY measured_at DESC LIMIT 1`,[projectId]);
-      const counts=await one(env.DB,`SELECT COUNT(*) total,SUM(CASE WHEN status='confirmed_feasible' THEN 1 ELSE 0 END) feasible,SUM(CASE WHEN status IN ('infeasible','confirmation_failed') THEN 1 ELSE 0 END) infeasible,SUM(CASE WHEN evidence_status='UNRESOLVED' THEN 1 ELSE 0 END) unresolved,AVG(boundary_score) avg_boundary,MIN(max_regret) min_regret FROM design_candidates WHERE project_id=?`,[projectId]);
-      const app=await one(env.DB,`SELECT * FROM approvals WHERE project_id=? ORDER BY created_at DESC LIMIT 1`,[projectId]);
-      const reviewer=await one(env.DB,`SELECT model_json,version,created_at FROM reviewer_models WHERE project_id=? ORDER BY version DESC LIMIT 1`,[projectId]);
+      const cycle=Number(p.research_cycle||1),rev=Number(p.evidence_revision||0);
+      const counts=await one(env.DB,`SELECT COUNT(*) total,SUM(CASE WHEN status='confirmed_feasible' THEN 1 ELSE 0 END) feasible,SUM(CASE WHEN status IN ('infeasible','confirmation_failed') THEN 1 ELSE 0 END) infeasible,SUM(CASE WHEN evidence_status='UNRESOLVED' THEN 1 ELSE 0 END) unresolved,AVG(boundary_score) avg_boundary,MIN(max_regret) min_regret FROM design_candidates WHERE project_id=? AND research_cycle=?`,[projectId,cycle]);
+      const app=await one(env.DB,`SELECT * FROM approvals WHERE project_id=? AND research_cycle=? AND evidence_revision=? AND stale_at IS NULL ORDER BY created_at DESC LIMIT 1`,[projectId,cycle,rev]);
+      const staleApproval=await one(env.DB,`SELECT * FROM approvals WHERE project_id=? AND stale_at IS NOT NULL ORDER BY stale_at DESC LIMIT 1`,[projectId]);
+      const reviewer=await one(env.DB,`SELECT model_json,version,created_at FROM reviewer_models WHERE project_id=? AND research_cycle=? AND evidence_revision=? ORDER BY version DESC LIMIT 1`,[projectId,cycle,rev]);
       const jobs=await all(env.DB,`SELECT type,status,attempts,last_error,created_at,updated_at FROM jobs WHERE project_id=? ORDER BY created_at DESC LIMIT 20`,[projectId]);
-      const runs=await one(env.DB,`SELECT COUNT(*) total,SUM(CASE WHEN phase='exploration' THEN 1 ELSE 0 END) exploration,SUM(CASE WHEN phase='refinement' THEN 1 ELSE 0 END) refinement,SUM(CASE WHEN phase='confirmation' THEN 1 ELSE 0 END) confirmation,SUM(CASE WHEN phase IN ('historical','stress') THEN 1 ELSE 0 END) robust FROM simulation_runs WHERE project_id=?`,[projectId]);
+      const runs=await one(env.DB,`SELECT COUNT(*) total,SUM(CASE WHEN r.phase='exploration' THEN 1 ELSE 0 END) exploration,SUM(CASE WHEN r.phase='refinement' THEN 1 ELSE 0 END) refinement,SUM(CASE WHEN r.phase='confirmation' THEN 1 ELSE 0 END) confirmation,SUM(CASE WHEN r.phase IN ('historical','stress') THEN 1 ELSE 0 END) robust FROM simulation_runs r JOIN design_candidates c ON c.id=r.candidate_id WHERE r.project_id=? AND c.research_cycle=?`,[projectId,cycle]);
       const scenarios=await one(env.DB,`SELECT COUNT(*) total,SUM(CASE WHEN scenario_type='historical' THEN 1 ELSE 0 END) historical,SUM(CASE WHEN scenario_type='adversarial' THEN 1 ELSE 0 END) adversarial FROM scenarios WHERE project_id=?`,[projectId]);
       const empirical=await empiricalReadiness(env,projectId);
       const protocol=await latestProtocol(env,projectId);
-      return json({project:p,definition:def?{...def,gate:safeJson(def.gate_json,{}),content:safeJson(def.content_json,{}),ai:safeJson(def.ai_note,{})}:null,measurement:meas?{...meas,metrics:safeJson(meas.metrics_json,{}),quality:safeJson(meas.quality_json,{})}:null,candidates:counts,approval:app?{...app,basis:safeJson(app.basis_json,{})}:null,reviewer:reviewer?{...reviewer,model:safeJson(reviewer.model_json,{})}:null,jobs,runs,scenarios,human_reviews:Number(p.reviewer_obs_count||0),empirical,protocol});
+      const gates=await approvalGates(env,projectId);
+      return json({project:p,definition:def?{...def,gate:safeJson(def.gate_json,{}),content:safeJson(def.content_json,{}),ai:safeJson(def.ai_note,{})}:null,measurement:meas?{...meas,metrics:safeJson(meas.metrics_json,{}),quality:safeJson(meas.quality_json,{})}:null,candidates:counts,approval:app?{...app,basis:safeJson(app.basis_json,{})}:null,stale_approval:staleApproval?{...staleApproval,basis:safeJson(staleApproval.basis_json,{})}:null,approval_gates:gates,reviewer:reviewer?{...reviewer,model:safeJson(reviewer.model_json,{})}:null,jobs,runs,scenarios,human_reviews:Number(p.reviewer_obs_count||0),empirical,protocol});
     }
     if(parts[3]==='run' && method==='POST'){ await run(env.DB,`UPDATE projects SET reviewer_hold_marker=NULL WHERE id=?`,[projectId]); const r=await advanceProject(env,projectId); return json({advance:r,transport:env.CDRS_QUEUE?'cloudflare-queue':'d1-fallback'}); }
     if(parts[3]==='sources' && method==='GET'){ return json({sources:await all(env.DB,`SELECT * FROM data_sources WHERE project_id=? ORDER BY created_at DESC`,[projectId])}); }
@@ -62,7 +69,7 @@ async function api(request,env){
     if(parts[3]==='observations' && method==='POST'){
       const b=await bodyJson(request), rows=Array.isArray(b)?b:(b.rows||[b]), stmts=[];
       for(const r of rows.slice(0,1000)) stmts.push(env.DB.prepare(`INSERT INTO raw_observations(id,project_id,source_id,observed_at,ingested_at,key,value_num,value_text,payload_json,quality_json) VALUES(?,?,?,?,?,?,?,?,?,?)`).bind(uid('obs'),projectId,null,r.observed_at||nowIso(),nowIso(),r.key||'signal',Number.isFinite(Number(r.value))?Number(r.value):null,Number.isFinite(Number(r.value))?null:String(r.value??''),JSON.stringify(r),JSON.stringify({manual:true})));
-      if(stmts.length) await env.DB.batch(stmts); return json({inserted:stmts.length});
+      if(stmts.length) await env.DB.batch(stmts); const ev=stmts.length?await registerEvidence(env,projectId,{kind:'RAW_OBSERVATION',source:'manual_api',detail:{inserted:stmts.length}}):null; return json({inserted:stmts.length,revalidation:ev});
     }
     if(parts[3]==='reviewer-observations' && method==='POST'){
       const b=await bodyJson(request); const id=uid('review');
@@ -70,13 +77,13 @@ async function api(request,env){
         env.DB.prepare(`INSERT INTO reviewer_observations(id,project_id,participant_hash,ai_confidence,ai_correct,human_accept,response_ms,recovered,recovery_ms,context_json,created_at) VALUES(?,?,?,?,?,?,?,?,?,?,?)`).bind(id,projectId,String(b.participant_hash||'anon'),Number(b.ai_confidence),b.ai_correct?1:0,b.human_accept?1:0,Number(b.response_ms||0),b.recovered?1:0,b.recovery_ms==null?null:Number(b.recovery_ms),JSON.stringify(b.context||{}),nowIso()),
         env.DB.prepare(`UPDATE projects SET reviewer_obs_count=reviewer_obs_count+1 WHERE id=?`).bind(projectId)
       ]);
-      await enqueueOnce(env,projectId,'advance_project',{},99,30); return json({id},201);   // 관측 N건 → advance 1건으로 병합
+      const ev=await registerEvidence(env,projectId,{kind:'HUMAN_TRIAL',source:'reviewer_ui',detail:{observation_id:id}}); return json({id,revalidation:ev},201);
     }
     if(parts[3]==='scenarios' && method==='GET'){ return json({scenarios:await all(env.DB,`SELECT * FROM scenarios WHERE project_id=? ORDER BY scenario_type,name`,[projectId])}); }
     if(parts[3]==='scenarios' && method==='POST'){
       const b=await bodyJson(request), rows=Array.isArray(b)?b:(b.rows||[b]), stmts=[];
       for(const r of rows.slice(0,500)) stmts.push(env.DB.prepare(`INSERT INTO scenarios(id,project_id,name,scenario_type,severity,volatility,delay_multiplier,loss_multiplier,metadata_json,created_at) VALUES(?,?,?,?,?,?,?,?,?,?)`).bind(uid('scenario'),projectId,r.name||'scenario',r.scenario_type||'historical',Number(r.severity||1),Number(r.volatility||1),Number(r.delay_multiplier||1),Number(r.loss_multiplier||1),JSON.stringify(r.metadata||{}),nowIso()));
-      if(stmts.length) await env.DB.batch(stmts); bust(env,projectId); return json({inserted:stmts.length},201);
+      if(stmts.length) await env.DB.batch(stmts); bust(env,projectId); const ev=stmts.length?await registerEvidence(env,projectId,{kind:'SCENARIO',source:'manual_api',detail:{inserted:stmts.length}}):null; return json({inserted:stmts.length,revalidation:ev},201);
     }
     if(parts[3]==='empirical' && parts.length===4 && method==='GET'){
       const readiness=await empiricalReadiness(env,projectId),cal=await loadEmpiricalCalibration(env,projectId);
@@ -87,21 +94,21 @@ async function api(request,env){
       const profile=await ensureEmpiricalProfile(env,projectId); return json({profile,readiness:await empiricalReadiness(env,projectId)});
     }
     if(parts[3]==='empirical' && parts[4]==='seed-panel' && method==='POST'){
-      const result=await seedBundledEmpiricalPanel(env,projectId); await enqueue(env,projectId,'measure_project',{},30,2); return json(result,201);
+      const result=await seedBundledEmpiricalPanel(env,projectId); const ev=await registerEvidence(env,projectId,{kind:'EMPIRICAL_EPISODE',source:'bundled_panel_manual',detail:{rows:result.rows}}); await enqueueOnce(env,projectId,'measure_project',{},30,2); return json({...result,revalidation:ev},201);
     }
     if(parts[3]==='empirical' && parts[4]==='episodes' && method==='POST'){
-      const b=await bodyJson(request),rows=Array.isArray(b)?b:(b.rows||[]),result=await importEmpiricalEpisodes(env,projectId,rows); await enqueue(env,projectId,'refit_empirical',{},22); await enqueue(env,projectId,'measure_project',{},30,2); return json(result,201);
+      const b=await bodyJson(request),rows=Array.isArray(b)?b:(b.rows||[]),result=await importEmpiricalEpisodes(env,projectId,rows); const ev=result.inserted?await registerEvidence(env,projectId,{kind:'EMPIRICAL_EPISODE',source:'manual_import',detail:{inserted:result.inserted}}):null; await enqueueOnce(env,projectId,'refit_empirical',{},22); return json({...result,revalidation:ev},201);
     }
     if(parts[3]==='empirical' && parts[4]==='refit' && method==='POST'){
       const b=await bodyJson(request); return json(await refitEmpiricalCalibration(env,projectId,{promote:!!b.promote}));
     }
     if(parts[3]==='candidates' && method==='GET'){
-      const rows=await all(env.DB,`SELECT c.*, (SELECT status FROM validations v WHERE v.candidate_id=c.id AND v.validation_type='human_recompute' ORDER BY created_at DESC LIMIT 1) final_status FROM design_candidates c WHERE project_id=? ORDER BY sigma,authority_k,delay_d LIMIT 500`,[projectId]); return json({candidates:rows});
+      const p=await one(env.DB,`SELECT research_cycle,evidence_revision FROM projects WHERE id=?`,[projectId]); const rows=await all(env.DB,`SELECT c.*, (SELECT status FROM validations v WHERE v.candidate_id=c.id AND v.validation_type='human_recompute' AND v.evidence_revision=? ORDER BY created_at DESC LIMIT 1) final_status FROM design_candidates c WHERE project_id=? AND research_cycle=? ORDER BY sigma,authority_k,delay_d LIMIT 500`,[Number(p?.evidence_revision||0),projectId,Number(p?.research_cycle||1)]); return json({candidates:rows});
     }
     if(parts[3]==='protocol' && method==='GET'){ const p=await latestProtocol(env,projectId); return p?json(p):json({error:'protocol_not_frozen'},404); }
     if(parts[3]==='scientific-signoff' && method==='POST'){ const b=await bodyJson(request); return json(await scientificSignoff(env,projectId,{reviewer_name:b.reviewer_name||'PI',rationale:b.rationale||''})); }
     if(parts[3]==='report' && method==='GET'){
-      let r=await one(env.DB,`SELECT * FROM reports WHERE project_id=? ORDER BY created_at DESC LIMIT 1`,[projectId]); if(r){ try{ r=await upgradeStoredReport(env,projectId,r); }catch(e){ /* 구버전 보고서는 그대로 반환 */ } } return r?json({...r,data:safeJson(r.data_json,{})}):json({error:'report_not_ready'},404);
+      const p=await one(env.DB,`SELECT research_cycle,evidence_revision FROM projects WHERE id=?`,[projectId]); let r=await one(env.DB,`SELECT * FROM reports WHERE project_id=? AND research_cycle=? AND evidence_revision=? AND stale_at IS NULL ORDER BY created_at DESC LIMIT 1`,[projectId,Number(p?.research_cycle||1),Number(p?.evidence_revision||0)]); if(r){ try{ r=await upgradeStoredReport(env,projectId,r); }catch(e){ /* 구버전 보고서는 그대로 반환 */ } } return r?json({...r,data:safeJson(r.data_json,{})}):json({error:'report_not_ready'},404);
     }
     if(parts[3]==='report' && method==='POST'){ return json(await generateReport(env,projectId)); }
     if(parts[3]==='thesis' && method==='GET'){ try{ return json(await buildThesisData(env,projectId)); }catch(e){ return json({error:String(e.message||e)},e.message==='project_not_found'?404:500); } }
@@ -111,6 +118,7 @@ async function api(request,env){
       const body=await exportCsv(env,projectId,name);
       return new Response(body,{headers:{'content-type':'text/csv; charset=utf-8','content-disposition':`attachment; filename="${name}.csv"`}});
     }
+    if(parts[3]==='evidence' && method==='GET'){ return json({events:await all(env.DB,`SELECT * FROM evidence_events WHERE project_id=? ORDER BY evidence_revision DESC LIMIT 100`,[projectId]),gates:await approvalGates(env,projectId)}); }
     if(parts[3]==='audit' && method==='GET'){ return json({audit:await all(env.DB,`SELECT * FROM audit_log WHERE project_id=? ORDER BY created_at DESC LIMIT 300`,[projectId])}); }
   }
 

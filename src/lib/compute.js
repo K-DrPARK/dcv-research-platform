@@ -233,10 +233,11 @@ export function sampleDesign(d,max,seed){
   return chosen;
 }
 export async function seedCandidates(env,projectId){
-  const existing=await one(env.DB,`SELECT COUNT(*) n FROM design_candidates WHERE project_id=?`,[projectId]); if(Number(existing?.n||0)>0){
+  const proj=await one(env.DB,`SELECT research_cycle,evidence_revision FROM projects WHERE id=?`,[projectId]); const cycle=Number(proj?.research_cycle||1);
+  const existing=await one(env.DB,`SELECT COUNT(*) n FROM design_candidates WHERE project_id=? AND research_cycle=?`,[projectId,cycle]); if(Number(existing?.n||0)>0){
     // 주기적 수집(collect→measure→seed_candidates)마다 buildProtocol(후보 128행+에폭+계수)을 다시 돌리던 경로.
     // 동결된 프로토콜이 이미 있으면 재구성하지 않는다(무결성은 compute_candidate 에서 검증).
-    const frozen=await one(env.DB,`SELECT 1 x FROM research_protocols WHERE project_id=? LIMIT 1`,[projectId]);
+    const frozen=await one(env.DB,`SELECT 1 x FROM research_protocols WHERE project_id=? AND research_cycle=? LIMIT 1`,[projectId,cycle]);
     if(!frozen) await ensureFrozenProtocol(env,projectId);
     return{created:0};
   }
@@ -248,7 +249,7 @@ export async function seedCandidates(env,projectId){
   if(Number.isFinite(Number(op.data_latency_days)))d.tau=robustGrid(Number(op.data_latency_days),0,30,true);
   if(Number.isFinite(Number(op.approval_delay_days)))d.d=robustGrid(Number(op.approval_delay_days),0,30,false);
   const combos=sampleDesign(d,Number(d.max_candidates||128),hashString(`${projectId}:design`)); const now=nowIso(); const candIds=combos.map(()=>uid('cand'));
-  const stmts=combos.map((x,i)=>env.DB.prepare(`INSERT INTO design_candidates(id,project_id,sigma,tau,alpha,authority_k,delay_d,recovery_w,adjust_m,status,estimator,evidence_status,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,'pending',?,'pending',?,?)`).bind(candIds[i],projectId,x.sigma,x.tau,x.alpha,x.K,x.d,x.W,x.m,x.estimator,now,now));
+  const stmts=combos.map((x,i)=>env.DB.prepare(`INSERT INTO design_candidates(id,project_id,sigma,tau,alpha,authority_k,delay_d,recovery_w,adjust_m,status,estimator,evidence_status,created_at,updated_at,research_cycle) VALUES(?,?,?,?,?,?,?,?,?,'pending',?,'pending',?,?,?)`).bind(candIds[i],projectId,x.sigma,x.tau,x.alpha,x.K,x.d,x.W,x.m,x.estimator,now,now,cycle));
   if(stmts.length)await env.DB.batch([...stmts,env.DB.prepare(`UPDATE projects SET candidate_count=? WHERE id=?`).bind(stmts.length,projectId)]);   // 목록 화면의 후보 수 카운터(0008)
   await ensureFrozenProtocol(env,projectId);
   await enqueueMany(env,projectId,'compute_candidate',candIds.map(id=>({candidate_id:id,phase:'exploration',cycle:0})),40);
@@ -278,16 +279,18 @@ async function priorAggregate(env,candidateId,phase){
 }
 function nForPhase(config,phase){ if(phase==='exploration')return config.exploration_n;if(phase==='refinement')return config.refinement_n;if(phase==='confirmation')return config.confirmation_n;return config.robust_n; }
 export async function computeCandidate(env,projectId,candidateId,phase='exploration',cycle=0){
-  await assertProtocolIntegrity(env,projectId);
   const c=await one(env.DB,`SELECT * FROM design_candidates WHERE id=? AND project_id=?`,[candidateId,projectId]);if(!c)throw new Error('candidate_not_found');
+  const current=await one(env.DB,`SELECT research_cycle FROM projects WHERE id=?`,[projectId]);if(Number(c.research_cycle||1)!==Number(current?.research_cycle||1))throw new Error('candidate_superseded_by_new_cycle');
+  await assertProtocolIntegrity(env,projectId);
   const def=await latestDefinition(env,projectId);if(!def)throw new Error('definition_missing');const constraints=def.content.constraints,cal=await loadEmpiricalCalibration(env,projectId),config=configFrom(def,env,cal);
-  let reviewer=null;if(phase==='recompute'){const rm=await cached(env,projectId,'reviewer:latest',()=>one(env.DB,`SELECT model_json FROM reviewer_models WHERE project_id=? ORDER BY version DESC LIMIT 1`,[projectId]));reviewer=rm?safeJson(rm.model_json,{}):null;}
+  let reviewer=null;if(phase==='recompute'){const pr=await one(env.DB,`SELECT research_cycle,evidence_revision FROM projects WHERE id=?`,[projectId]);const key=`reviewer:latest:${pr?.research_cycle||1}:${pr?.evidence_revision||0}`;const rm=await cached(env,projectId,key,()=>one(env.DB,`SELECT model_json FROM reviewer_models WHERE project_id=? AND research_cycle=? AND evidence_revision=? ORDER BY version DESC LIMIT 1`,[projectId,Number(pr?.research_cycle||1),Number(pr?.evidence_revision||0)]));reviewer=rm?safeJson(rm.model_json,{}):null;}
   const scenarioPack=await loadScenarios(env,projectId,phase==='recompute'?'confirmation':phase,cal),scenarios=scenarioPack.scenarios; const seed=deterministicSeed(projectId,candidateId,phase,cycle),rng=mulberry32(seed),n=nForPhase(config,phase);
   const batch=emptyAgg(); for(let i=0;i<n;i++){const sc=scenarios[i%scenarios.length];addEpisode(batch,simulateEpisode(c,constraints,rng,sc,reviewer,config),sc.key);}
   let combined=batch; if(['refinement','confirmation'].includes(phase)){const prior=await priorAggregate(env,candidateId,phase);combined=mergeAgg(prior,batch);}
   const confirmatory=['confirmation','historical','stress','recompute'].includes(phase);
   const ev=finalizeAgg(combined,constraints,confirmatory?config.familywise_confidence:config.confidence,{method:config.multiplicity_method,familySize:config.family_size,adjust:confirmatory}); const m=ev.metrics,id=uid('sim');
-  await run(env.DB,`INSERT INTO simulation_runs(id,project_id,candidate_id,phase,seed,n,loss_mean,loss_exceed_rate,fp_rate,fn_rate,review_burden,recovery_time,regret,result_json,created_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,[id,projectId,candidateId,phase,seed,n,m.loss_mean,m.loss_exceed_rate,m.fp_rate,m.fn_rate,m.review_burden,m.recovery_time,null,JSON.stringify({...ev,raw:batch,cycle,estimator:c.estimator,reviewer_used:!!reviewer,scenario_source:scenarioPack.source,empirical_ready:scenarioPack.empirical_ready,empirical_episode_n:scenarioPack.episode_n,empirical_profile:cal.profile.version}),nowIso()]);
+  const projRev=await one(env.DB,`SELECT evidence_revision FROM projects WHERE id=?`,[projectId]);
+  await run(env.DB,`INSERT INTO simulation_runs(id,project_id,candidate_id,phase,seed,n,loss_mean,loss_exceed_rate,fp_rate,fn_rate,review_burden,recovery_time,regret,result_json,created_at,evidence_revision) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,[id,projectId,candidateId,phase,seed,n,m.loss_mean,m.loss_exceed_rate,m.fp_rate,m.fn_rate,m.review_burden,m.recovery_time,null,JSON.stringify({...ev,raw:batch,cycle,estimator:c.estimator,reviewer_used:!!reviewer,scenario_source:scenarioPack.source,empirical_ready:scenarioPack.empirical_ready,empirical_episode_n:scenarioPack.episode_n,empirical_profile:cal.profile.version}),nowIso(),Number(projRev?.evidence_revision||0)]);
   await run(env.DB,`INSERT INTO candidate_evidence(id,project_id,candidate_id,phase,cycle,classification,boundary_score,metrics_json,created_at) VALUES(?,?,?,?,?,?,?,?,?)`,[uid('evidence'),projectId,candidateId,phase,cycle,ev.classification,ev.boundary_score,JSON.stringify(ev),nowIso()]);
   if(['exploration','refinement'].includes(phase)){
     let status=ev.classification==='FEASIBLE'?'provisionally_feasible':ev.classification==='INFEASIBLE'?'infeasible':'unresolved';
@@ -305,7 +308,8 @@ export async function computeCandidate(env,projectId,candidateId,phase='explorat
   return{id,phase,cycle,seed,classification:ev.classification,boundary_score:ev.boundary_score,...m};
 }
 export async function enqueueRobustValidation(env,projectId){
-  const cands=await all(env.DB,`SELECT id FROM design_candidates WHERE project_id=? AND status='confirmed_feasible' ORDER BY boundary_score DESC LIMIT 60`,[projectId]);
+  const proj=await one(env.DB,`SELECT research_cycle FROM projects WHERE id=?`,[projectId]); const cycle=Number(proj?.research_cycle||1);
+  const cands=await all(env.DB,`SELECT id FROM design_candidates WHERE project_id=? AND research_cycle=? AND status='confirmed_feasible' ORDER BY boundary_score DESC LIMIT 60`,[projectId,cycle]);
   // 후보마다 'SELECT DISTINCT phase' 를 날리던 N+1 루프 → 프로젝트 단위 1회 조회(커버링 인덱스)
   const doneRows=await all(env.DB,`SELECT DISTINCT candidate_id,phase FROM simulation_runs WHERE project_id=? AND phase IN ('historical','stress')`,[projectId]);
   const done=new Set(doneRows.map(r=>`${r.candidate_id}|${r.phase}`));
@@ -319,7 +323,8 @@ export async function enqueueRobustValidation(env,projectId){
   return{queued:hist.length+stress.length,candidates:cands.length};
 }
 export async function computeRegretTable(env,projectId,preloadedRuns=null){
-  const cands=await all(env.DB,`SELECT id FROM design_candidates WHERE project_id=? AND status='confirmed_feasible'`,[projectId]);
+  const proj=await one(env.DB,`SELECT research_cycle FROM projects WHERE id=?`,[projectId]); const cycle=Number(proj?.research_cycle||1);
+  const cands=await all(env.DB,`SELECT id FROM design_candidates WHERE project_id=? AND research_cycle=? AND status='confirmed_feasible'`,[projectId,cycle]);
   const confirmedIds=new Set(cands.map(c=>c.id));
   // 후보마다 simulation_runs 를 따로 조회하던 N+1 루프 → 프로젝트 단위 1회 조회(호출자가 이미 읽었으면 재사용)
   const runs=preloadedRuns||await all(env.DB,`SELECT candidate_id,phase,result_json FROM simulation_runs WHERE project_id=? AND phase IN ('historical','stress') ORDER BY created_at DESC`,[projectId]);

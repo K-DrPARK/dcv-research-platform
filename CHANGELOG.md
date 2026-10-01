@@ -1,3 +1,6 @@
+## v0.5.16
+- 대통령실 사이트를 참고한 화이트/네이비 공공서비스형 UI 전면 개편: 큰 타이포, 데스크톱 수평 메뉴, 6:6/7:5 균형 레이아웃, 상세영역 빈 공간 제거, 접근성·가독성 강화.
+
 ## v0.5.15 — Light Research Console UI
 
 - Reference style: `cbdc-research-client.pages.dev`의 연구 콘솔 UI를 바탕으로 밝은 white/light-blue surface, compact form/card, restrained blue accent로 전면 개편.

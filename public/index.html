@@ -13,17 +13,21 @@
   <div class="ambient-grid"></div>
   <nav class="navbar fixed-top dcv-navbar" aria-label="DCV primary navigation">
     <div class="container-fluid px-3 px-lg-4">
-      <button class="navbar-toggler dcv-hamburger" type="button" data-bs-toggle="offcanvas" data-bs-target="#dcvMenu" aria-controls="dcvMenu" aria-label="메뉴 열기">
+      <button class="navbar-toggler dcv-hamburger d-xl-none" type="button" data-bs-toggle="offcanvas" data-bs-target="#dcvMenu" aria-controls="dcvMenu" aria-label="메뉴 열기">
         <span></span><span></span><span></span>
       </button>
       <a class="navbar-brand d-flex align-items-center gap-3 ms-2" href="#">
         <span class="brand-mark"><i class="bi bi-hexagon-fill"></i></span>
         <span><b>DCV</b><small>RESEARCH PLATFORM</small></span>
       </a>
-      <div class="nav-search d-none d-md-flex ms-auto me-3">
-        <i class="bi bi-search"></i><input id="globalSearch" placeholder="연구 프로젝트, 데이터, 후보 설계를 검색하세요..." aria-label="검색">
-        <kbd>/</kbd>
-      </div>
+      <nav class="dcv-topnav d-none d-xl-flex ms-auto" aria-label="주요 메뉴">
+        <a href="#projectsSection">연구 프로젝트</a>
+        <a href="#dataSection">외부 데이터</a>
+        <a href="#computeSection">계산 엔진</a>
+        <a href="#validateSection">검증·분석</a>
+        <a href="#approvalSection">승인</a>
+        <a href="#reportSection">논문·보고서</a>
+      </nav>
       <button id="refreshBtn" class="icon-btn" title="새로고침"><i class="bi bi-arrow-clockwise"></i></button>
       <button id="tokenBtn" class="profile-chip ms-2"><span class="avatar">R</span><span class="d-none d-lg-block"><b>박사 연구자</b><small>연구책임자</small></span></button>
     </div>
@@ -67,13 +71,13 @@
     <section class="row g-3 mt-1" id="stats"></section>
 
     <section class="row g-3 mt-1" id="computeSection">
-      <div class="col-12 col-xxl-7">
+      <div class="col-12 col-xxl-6">
         <article class="glass-panel h-100">
           <div class="panel-head"><div><span class="panel-icon"><i class="bi bi-bounding-box-circles"></i></span><b>위임 가능 영역</b><small>Delegation Feasible Region · σ × α</small></div><span id="regionBadge" class="status-pill neutral">NO PROJECT</span></div>
           <div class="chart-wrap"><canvas id="regionCanvas" height="440"></canvas><div class="chart-legend"><span><i class="dot feasible"></i>CONFIRMED</span><span><i class="dot unresolved"></i>BOUNDARY</span><span><i class="dot infeasible"></i>INFEASIBLE</span></div></div>
         </article>
       </div>
-      <div class="col-12 col-xxl-5">
+      <div class="col-12 col-xxl-6">
         <div class="row g-3 h-100">
           <div class="col-12 col-md-6 col-xxl-12">
             <article class="glass-panel compact h-100" id="validateSection">
@@ -92,13 +96,13 @@
     </section>
 
     <section class="row g-3 mt-1" id="projectsSection">
-      <div class="col-12 col-xl-8">
+      <div class="col-12 col-xl-7">
         <article class="glass-panel">
           <div class="panel-head"><div><span class="panel-icon"><i class="bi bi-layers"></i></span><b>연구 프로젝트</b><small>Research Projects</small></div><button class="btn-future" id="newProjectBtn"><i class="bi bi-plus-lg"></i> 새 연구</button></div>
           <div id="projects" class="project-list"></div>
         </article>
       </div>
-      <div class="col-12 col-xl-4" id="approvalSection">
+      <div class="col-12 col-xl-5" id="approvalSection">
         <article class="glass-panel h-100">
           <div class="panel-head"><div><span class="panel-icon gold"><i class="bi bi-person-check"></i></span><b>승인 워크플로우</b><small>Approval Workflow</small></div></div>
           <div id="approvalPanel"></div>

@@ -47,6 +47,13 @@ export async function advanceProject(env,projectId){
   }
 
   const cycle=Number(p.research_cycle||1),rev=Number(p.evidence_revision||0);
+  // D1 read guard: expensive candidate/run aggregates are unnecessary while a downstream batch is still in flight.
+  // One indexed jobs lookup replaces repeated 128-row candidate scans on every Cron tick during compute/robust/recompute.
+  const busy=await one(env.DB,`SELECT type,phase FROM jobs WHERE project_id=? AND status IN ('queued','running') AND type IN ('compute_candidate','validate_project','recompute_project','finalize_recompute') LIMIT 1`,[projectId]);
+  if(busy){
+    const ph=String(busy.phase||''); const stage=busy.type==='compute_candidate'?(ph==='historical'||ph==='stress'?'validate':ph==='recompute'?'recompute':'compute'):busy.type==='validate_project'?'validate':'recompute';
+    await setStage(env,p,stage); return {stage,waiting:'jobs_in_flight',job_type:busy.type,phase:ph||null};
+  }
   const cand=await one(env.DB,`SELECT COUNT(*) total,SUM(CASE WHEN status='confirmed_feasible' THEN 1 ELSE 0 END) feasible,SUM(CASE WHEN status IN ('pending','unresolved','provisionally_feasible') THEN 1 ELSE 0 END) active FROM design_candidates WHERE project_id=? AND research_cycle=?`,[projectId,cycle]);
   const total=Number(cand?.total||0), feasible=Number(cand?.feasible||0), active=Number(cand?.active||0);
   if(!total){

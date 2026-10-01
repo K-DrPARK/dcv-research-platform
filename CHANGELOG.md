@@ -213,3 +213,11 @@
 - Added Case B layer for Open Fiscal Data and e나라도움 with configurable endpoint/row/value/time mappings and secret-based authentication.
 - Added normalized `official_observations`, sync audit trail, Case A/B layer status, CSV exports and thesis report section 3.7.
 - Preserved incremental DCV revalidation: only changed observations count as new evidence.
+
+## v0.5.9 — BIS/ECB CDRS mapping + D1 read optimization
+- BIS CPMI total cashless/fast-payment observations are converted to an external `D_CPMI` validation proxy using a historical-level percentile and fast-payment share; panel `digital_adoption` is never overwritten.
+- ECB LCR/CET1 are converted to an external resilience index `R_ECB` from regulatory-minimum headroom and mapped only to the predeclared CDRS stability-threshold range; this is an external stress-validation mapping, not Korea calibration.
+- Added `external_validation_metrics` and six explicit official-data CDRS stress scenarios (BIS level/fast/equal and ECB LCR/CET1/equal).
+- Official-source ingestion no longer executes a D1 SELECT inside the observation loop: one source-wide prefetch plus `DB.batch()` writes only changed rows.
+- Consolidated repeated project metadata reads, reduced project-list PRAGMA/COUNT reads, and added an in-flight-job guard before candidate aggregate scans during Cron advancement.
+- Added supporting indexes and D1 profiling documentation. Existing project rows remain non-destructively preserved.

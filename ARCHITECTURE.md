@@ -72,3 +72,17 @@ The platform separates official external data into two evidence layers:
 - **Case B**: 열린재정 and e나라도움/보조금통합포털 for the fiscal/subsidy-payment replication case.
 
 All connectors normalize observations into `official_observations` while retaining raw payload/dimensions and connector provenance. Changed observations trigger the incremental evidence workflow from MEASURE; unchanged refreshes are idempotent. Case-B public APIs are contextual/execution covariates and are not treated as fraud/payment-stop ground-truth labels.
+
+## External validation mapping (v0.5.9)
+Official-data mapping is deliberately separated from empirical calibration.
+
+- BIS CPMI: `D_level = percentile(log(1+cashless_volume))`; `D_fast = fast_payment_volume / total_cashless_volume`; `D_CPMI = mean(available components)`. CDRS receives level-only, fast-only, and equal-weight stress scenarios. The panel's `digital_adoption` is unchanged.
+- ECB: `h_LCR=max(0,1-100/LCR)` and `h_CET1=max(0,1-4.5/CET1)`; `R_ECB=mean(available headrooms)`; `theta_ext = theta_low + (theta_high-theta_low)*R_ECB`. LCR-only, CET1-only, and equal-weight scenarios are retained. This maps aggregate supervisory resilience into the already declared threshold range; it is not a structural identification of theta.
+- Provenance and mapping versions are persisted in `external_validation_metrics`.
+
+## D1 read discipline (v0.5.9)
+- No per-observation SELECT in official-source ingestion; source rows are prefetched once and diffed in memory.
+- Changed observations are persisted with `DB.batch()` in bounded chunks.
+- `advanceProject()` checks indexed in-flight work before reading candidate aggregates.
+- Per-candidate project metadata is fetched once and reused across protocol, reviewer, and simulation-run paths.
+- Project-list compatibility metadata is reused rather than issuing redundant PRAGMA/COUNT reads.

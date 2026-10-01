@@ -62,8 +62,8 @@ export async function ensureFrozenProtocol(env,projectId){
 // 작업당 수백 행을 읽었다. 같은 isolate 에서 같은 protocol_hash 를 검증한 지 INTEGRITY_TTL_MS 이내이면 재검증을 건너뛴다.
 // 동결된 해시 자체는 매번 1행(해시 컬럼만)으로 확인하므로 새 프로토콜 버전이 생기면 즉시 재검증된다.
 const INTEGRITY_TTL_MS=10*60*1000;
-export async function assertProtocolIntegrity(env,projectId){
-  const p=await one(env.DB,`SELECT research_cycle FROM projects WHERE id=?`,[projectId]); const cycle=Number(p?.research_cycle||1);
+export async function assertProtocolIntegrity(env,projectId,context={}){
+  const cycle=context.cycle==null?Number((await one(env.DB,`SELECT research_cycle FROM projects WHERE id=?`,[projectId]))?.research_cycle||1):Number(context.cycle||1);
   const head=await one(env.DB,`SELECT protocol_hash FROM research_protocols WHERE project_id=? AND research_cycle=? ORDER BY version DESC LIMIT 1`,[projectId,cycle]);
   if(!head) return ensureFrozenProtocol(env,projectId);
   const ok=await cached(env,projectId,`integrity:${head.protocol_hash}`,async()=>{

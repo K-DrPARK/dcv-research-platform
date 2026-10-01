@@ -178,3 +178,8 @@ Use **External Data → FDIC Episode Connector → 재검증 우선순위** or c
 - Case B: Open Fiscal Data + e나라도움/보조금통합포털. Case B is isolated from Case A and requires dataset-specific endpoint/mapping configuration plus Cloudflare secrets.
 - Secrets: `ECOS_API_KEY`, `OPENFISCAL_API_KEY`, `BOJO_API_KEY`.
 - New/changed official observations create external evidence; unchanged scheduled refreshes do not create a new research cycle.
+
+### v0.5.9: official-data validation mapping
+BIS CPMI and ECB supervisory observations now enter CDRS as **independent external validation scenarios**, not as silent replacements for the historical panel variables. `D_CPMI` combines the percentile of log cashless-payment volume with the fast-payment share when both are available. `R_ECB` combines LCR and CET1 regulatory-headroom scores and maps the result only inside the predeclared stability-threshold range. The report exposes component-only sensitivity variants.
+
+D1 reads were also profiled and reduced: official observation ingestion now performs one indexed prefetch per source and batch-writes changed rows; the orchestrator avoids candidate-status aggregate scans while compute/validate/recompute jobs are already in flight.

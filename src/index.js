@@ -20,15 +20,15 @@ function pathParts(url){ return new URL(url).pathname.split('/').filter(Boolean)
 async function tableColumns(db, table){
   try{return new Set((await all(db,`PRAGMA table_info(${table})`)).map(x=>x.name));}catch{return new Set();}
 }
-async function storageIntegrity(env){
-  const pcols=await tableColumns(env.DB,'projects');
-  let projectCount=0,lineage=null;
-  try{projectCount=Number((await one(env.DB,`SELECT COUNT(*) n FROM projects`))?.n||0);}catch{}
+async function storageIntegrity(env,pcols=null,knownProjectCount=null){
+  pcols=pcols||await tableColumns(env.DB,'projects');
+  let projectCount=knownProjectCount==null?0:Number(knownProjectCount),lineage=null;
+  if(knownProjectCount==null)try{projectCount=Number((await one(env.DB,`SELECT COUNT(*) n FROM projects`))?.n||0);}catch{}
   try{lineage=(await one(env.DB,`SELECT value FROM platform_meta WHERE key='storage_lineage_id'`))?.value||null;}catch{}
   return {project_count:projectCount,storage_lineage_id:lineage,projects_columns:[...pcols],schema:{candidate_count:pcols.has('candidate_count'),research_cycle:pcols.has('research_cycle'),evidence_revision:pcols.has('evidence_revision')}};
 }
-async function compatibleProjectList(env){
-  const pcols=await tableColumns(env.DB,'projects');
+async function compatibleProjectList(env,pcols=null){
+  pcols=pcols||await tableColumns(env.DB,'projects');
   if(!pcols.has('id')) return [];
   const rows=await all(env.DB,`SELECT * FROM projects ORDER BY created_at DESC`);
   const ccounts={};
@@ -56,8 +56,8 @@ async function api(request,env){
   if(url.pathname==='/api/system/integrity' && method==='GET') return json(await storageIntegrity(env));
 
   if(url.pathname==='/api/projects' && method==='GET'){
-    const rows=await compatibleProjectList(env);
-    return json({projects:rows,integrity:await storageIntegrity(env)});
+    const pcols=await tableColumns(env.DB,'projects'),rows=await compatibleProjectList(env,pcols);
+    return json({projects:rows,integrity:await storageIntegrity(env,pcols,rows.length)});
   }
   if(url.pathname==='/api/projects' && method==='POST'){
     const b=await bodyJson(request), id=uid('project'), now=nowIso();

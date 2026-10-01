@@ -38,3 +38,24 @@
 - Unchanged refreshes do not create a new evidence revision.
 - Case A and Case B are stored separately in `project_case_layers` and `official_observations.case_layer`.
 - No official connector silently overwrites the 81-episode panel or a design parameter.
+
+## CDRS mapping rules (v0.5.9)
+
+### BIS CPMI → external digital-payment intensity (`D_CPMI`)
+The connector collects total cashless-payment volume and fast-payment volume. The platform derives:
+
+- `D_level`: percentile rank of `log(1 + total cashless volume)` inside the available BIS time series.
+- `D_fast`: `fast payment volume / total cashless payment volume`, clipped to [0,1].
+- `D_CPMI`: equal-weight mean of the components that are available.
+
+CDRS runs the equal-weight value and the two component-only variants as external stress scenarios. This metric is an **independent validation proxy** and never overwrites `empirical_episodes.digital_adoption`.
+
+### ECB supervisory data → external resilience (`R_ECB`)
+Using the latest common observation period for LCR and CET1:
+
+- `h_LCR = max(0, 1 - 100/LCR)`
+- `h_CET1 = max(0, 1 - 4.5/CET1)`
+- `R_ECB = mean(h_LCR, h_CET1)`
+- `theta_ext = theta_low + (theta_high-theta_low) * R_ECB`
+
+The 100% LCR and 4.5% CET1 values are regulatory minima used only as normalization anchors. `theta_ext` is bounded to the model's predeclared theta range and is an external stress-validation transform, not an estimate of Korea's theta. Component-only variants are retained for sensitivity analysis.

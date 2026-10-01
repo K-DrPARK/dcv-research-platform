@@ -5,6 +5,7 @@ import { wilson, normInv } from './stats.js';
 import { loadEmpiricalCalibration, empiricalScenarioFromEpisode } from './empirical.js';
 import { ensureFrozenProtocol, assertProtocolIntegrity } from './rigor.js';
 import { cached } from './memo.js';
+import { officialValidationScenarios } from './official_mapping.js';
 
 const EPS=1e-9;
 const ESTIMATORS=['ema','kalman','changepoint','adaptive'];
@@ -109,7 +110,7 @@ function reviewerDecision(rng,aiStop,shouldStop,confidence,reviewer,delayBase,de
 }
 function simulateEpisode(c,constraints,rng,scenario,reviewer,config){
   const horizon=Number(config.horizon||24), tau=Math.max(0,Math.round(c.tau||0));
-  const threshold=Number(config.risk_threshold||.68), latentThreshold=Math.log(threshold/(1-threshold));
+  const threshold=Number(scenario.risk_threshold_override??config.risk_threshold??.68), latentThreshold=Math.log(threshold/(1-threshold));
   const history=[], est={x:0,p:1,var:1,change:false};
   let state=randn(rng)*.25, reviewN=0, rtSum=0, fp=0,fn=0, decisions=0, totalLoss=0, adjustmentN=0;
   let rollingErrors=0, safeMode=0;
@@ -266,8 +267,8 @@ async function loadScenarios(env,projectId,phase,cal){
   if(phase==='stress'){
     const rows=await cached(env,projectId,'scn:user-adversarial',()=>all(env.DB,`SELECT * FROM scenarios WHERE project_id=? AND scenario_type='adversarial' ORDER BY name`,[projectId]));
     if(rows.length)return {scenarios:rows.map(r=>scenarioFromRow(r,cal)),source:'user_adversarial_scenarios',empirical_ready:true,episode_n:rows.length};
-    const base=paperStressScenarios(cal),boot=calibrationUncertaintyScenarios(cal),loss=lossProxyScenarios(cal),scenarios=[...base,...boot,...loss];
-    return {scenarios,source:'paper_wide_40pct_grid+calibration_uncertainty+loss_proxy_sensitivity',empirical_ready:true,episode_n:scenarios.length};
+    const base=paperStressScenarios(cal),boot=calibrationUncertaintyScenarios(cal),loss=lossProxyScenarios(cal),official=await officialValidationScenarios(env,projectId,cal),scenarios=[...base,...boot,...loss,...official];
+    return {scenarios,source:`paper_wide_40pct_grid+calibration_uncertainty+loss_proxy_sensitivity${official.length?'+official_external_validation':''}`,empirical_ready:true,episode_n:scenarios.length,official_scenarios:official.length};
   }
   return {scenarios:syntheticScenarios(cal),source:'published_summary_anchor',empirical_ready:false,episode_n:0};
 }
@@ -280,17 +281,16 @@ async function priorAggregate(env,candidateId,phase){
 function nForPhase(config,phase){ if(phase==='exploration')return config.exploration_n;if(phase==='refinement')return config.refinement_n;if(phase==='confirmation')return config.confirmation_n;return config.robust_n; }
 export async function computeCandidate(env,projectId,candidateId,phase='exploration',cycle=0){
   const c=await one(env.DB,`SELECT * FROM design_candidates WHERE id=? AND project_id=?`,[candidateId,projectId]);if(!c)throw new Error('candidate_not_found');
-  const current=await one(env.DB,`SELECT research_cycle FROM projects WHERE id=?`,[projectId]);if(Number(c.research_cycle||1)!==Number(current?.research_cycle||1))throw new Error('candidate_superseded_by_new_cycle');
-  await assertProtocolIntegrity(env,projectId);
+  const projectMeta=await one(env.DB,`SELECT research_cycle,evidence_revision FROM projects WHERE id=?`,[projectId]);const projectCycle=Number(projectMeta?.research_cycle||1),projectRev=Number(projectMeta?.evidence_revision||0);if(Number(c.research_cycle||1)!==projectCycle)throw new Error('candidate_superseded_by_new_cycle');
+  await assertProtocolIntegrity(env,projectId,{cycle:projectCycle});
   const def=await latestDefinition(env,projectId);if(!def)throw new Error('definition_missing');const constraints=def.content.constraints,cal=await loadEmpiricalCalibration(env,projectId),config=configFrom(def,env,cal);
-  let reviewer=null;if(phase==='recompute'){const pr=await one(env.DB,`SELECT research_cycle,evidence_revision FROM projects WHERE id=?`,[projectId]);const key=`reviewer:latest:${pr?.research_cycle||1}:${pr?.evidence_revision||0}`;const rm=await cached(env,projectId,key,()=>one(env.DB,`SELECT model_json FROM reviewer_models WHERE project_id=? AND research_cycle=? AND evidence_revision=? ORDER BY version DESC LIMIT 1`,[projectId,Number(pr?.research_cycle||1),Number(pr?.evidence_revision||0)]));reviewer=rm?safeJson(rm.model_json,{}):null;}
+  let reviewer=null;if(phase==='recompute'){const key=`reviewer:latest:${projectCycle}:${projectRev}`;const rm=await cached(env,projectId,key,()=>one(env.DB,`SELECT model_json FROM reviewer_models WHERE project_id=? AND research_cycle=? AND evidence_revision=? ORDER BY version DESC LIMIT 1`,[projectId,projectCycle,projectRev]));reviewer=rm?safeJson(rm.model_json,{}):null;}
   const scenarioPack=await loadScenarios(env,projectId,phase==='recompute'?'confirmation':phase,cal),scenarios=scenarioPack.scenarios; const seed=deterministicSeed(projectId,candidateId,phase,cycle),rng=mulberry32(seed),n=nForPhase(config,phase);
   const batch=emptyAgg(); for(let i=0;i<n;i++){const sc=scenarios[i%scenarios.length];addEpisode(batch,simulateEpisode(c,constraints,rng,sc,reviewer,config),sc.key);}
   let combined=batch; if(['refinement','confirmation'].includes(phase)){const prior=await priorAggregate(env,candidateId,phase);combined=mergeAgg(prior,batch);}
   const confirmatory=['confirmation','historical','stress','recompute'].includes(phase);
   const ev=finalizeAgg(combined,constraints,confirmatory?config.familywise_confidence:config.confidence,{method:config.multiplicity_method,familySize:config.family_size,adjust:confirmatory}); const m=ev.metrics,id=uid('sim');
-  const projRev=await one(env.DB,`SELECT evidence_revision FROM projects WHERE id=?`,[projectId]);
-  await run(env.DB,`INSERT INTO simulation_runs(id,project_id,candidate_id,phase,seed,n,loss_mean,loss_exceed_rate,fp_rate,fn_rate,review_burden,recovery_time,regret,result_json,created_at,evidence_revision) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,[id,projectId,candidateId,phase,seed,n,m.loss_mean,m.loss_exceed_rate,m.fp_rate,m.fn_rate,m.review_burden,m.recovery_time,null,JSON.stringify({...ev,raw:batch,cycle,estimator:c.estimator,reviewer_used:!!reviewer,scenario_source:scenarioPack.source,empirical_ready:scenarioPack.empirical_ready,empirical_episode_n:scenarioPack.episode_n,empirical_profile:cal.profile.version}),nowIso(),Number(projRev?.evidence_revision||0)]);
+  await run(env.DB,`INSERT INTO simulation_runs(id,project_id,candidate_id,phase,seed,n,loss_mean,loss_exceed_rate,fp_rate,fn_rate,review_burden,recovery_time,regret,result_json,created_at,evidence_revision) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,[id,projectId,candidateId,phase,seed,n,m.loss_mean,m.loss_exceed_rate,m.fp_rate,m.fn_rate,m.review_burden,m.recovery_time,null,JSON.stringify({...ev,raw:batch,cycle,estimator:c.estimator,reviewer_used:!!reviewer,scenario_source:scenarioPack.source,empirical_ready:scenarioPack.empirical_ready,empirical_episode_n:scenarioPack.episode_n,empirical_profile:cal.profile.version}),nowIso(),projectRev]);
   await run(env.DB,`INSERT INTO candidate_evidence(id,project_id,candidate_id,phase,cycle,classification,boundary_score,metrics_json,created_at) VALUES(?,?,?,?,?,?,?,?,?)`,[uid('evidence'),projectId,candidateId,phase,cycle,ev.classification,ev.boundary_score,JSON.stringify(ev),nowIso()]);
   if(['exploration','refinement'].includes(phase)){
     let status=ev.classification==='FEASIBLE'?'provisionally_feasible':ev.classification==='INFEASIBLE'?'infeasible':'unresolved';

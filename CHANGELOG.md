@@ -1,3 +1,13 @@
+## v0.5.21 — Live-load recovery + toolkit click fix + right-reference height sync + report figure restore
+
+- Fixed thesis-toolkit/module timing race by resolving `window.DCV` dynamically at click time; Word, MD+그림, 더보기 and 논문 도구 controls no longer retain an undefined core reference.
+- Initial browser load now retries project loading up to three times for transient cold-start/network failures instead of requiring the in-app refresh button.
+- API responses and browser fetches remain no-store; static asset URLs bumped to v0.5.21 to avoid stale bundles.
+- Desktop analytical cards now use the rendered right-most card as the height reference; left and middle cards are set to the same measured height. Projects card is similarly matched to Approval.
+- Added ResizeObserver re-sync after dynamic content changes.
+- Report figures now hydrate independently, match tolerant path/query/extension forms, invalidate on cycle/revision change, and use per-figure SVG fallback so one rendering exception cannot blank every image.
+- Auxiliary snapshot cache is only committed after all auxiliary loads succeed; transient failures auto-retry.
+
 ## v0.5.20 — F5 Recovery + Exact Height Sync + Report Figure Recovery
 
 - Added `Cache-Control: no-store` to API JSON responses and browser API/thesis fetches so a browser reload cannot reuse stale project snapshots.

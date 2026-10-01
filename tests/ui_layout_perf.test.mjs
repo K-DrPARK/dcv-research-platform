@@ -10,7 +10,7 @@ const compute=fs.readFileSync(new URL('../src/lib/compute.js',import.meta.url),'
 
 test('primary dashboard uses exact CSS grids for balanced rows and columns',()=>{
   assert.match(css,/#stats\{[\s\S]*grid-template-columns:repeat\(4,minmax\(0,1fr\)\)/);
-  assert.match(css,/#computeSection\{[\s\S]*grid-template-columns:minmax\(0,1\.08fr\) minmax\(0,\.82fr\) minmax\(0,1\.10fr\)/);
+  assert.match(css,/#computeSection\{[\s\S]*grid-template-columns:repeat\(3,minmax\(0,1fr\)\)/);
   assert.match(css,/#projectsSection\{[\s\S]*grid-template-columns:minmax\(0,1fr\) minmax\(0,1fr\)/);
   assert.match(css,/table-layout:fixed!important/);
 });
@@ -42,4 +42,17 @@ test('report preview defaults to rendered HTML and explicitly hydrates figures',
   assert.match(thesis,/window\.DCVReportRender = render/);
   assert.match(thesis,/view\.innerHTML = mdToHtml\(md,\{figure:figureLoadingResolver\}\)/);
   assert.match(app,/window\.DCVReportRender\?\.\(\)/);
+});
+
+test('thesis toolkit resolves DCV core dynamically so module order cannot break clicks',()=>{
+  const thesis=fs.readFileSync(new URL('../public/thesis.js',import.meta.url),'utf8');
+  assert.match(thesis,/new Proxy\(\{\}, \{ get\(_t,p\)/);
+  assert.match(thesis,/const core=window\.DCV/);
+});
+
+test('initial boot retries transient project load failures and analytical heights use right card as reference',()=>{
+  assert.match(app,/for\(let attempt=0;attempt<3;attempt\+\+\)/);
+  assert.match(app,/const target=Math\.ceil\(right\.scrollHeight\)/);
+  assert.match(app,/const target=Math\.ceil\(approval\.scrollHeight\)/);
+  assert.match(app,/setProperty\('height',`\$\{target\}px`,'important'\)/);
 });

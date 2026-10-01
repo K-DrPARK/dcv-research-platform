@@ -4,7 +4,7 @@ import { mdToHtml, buildHtmlDocument } from './mdhtml.js';
 import { buildDocx } from './docx.js';
 import { zipStore } from './zip.js';
 
-const D = window.DCV, $ = s => document.querySelector(s), esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+const D = new Proxy({}, { get(_t,p){ const core=window.DCV; if(!core) throw new Error('DCV core not ready'); const v=core[p]; return typeof v==='function'?v.bind(core):v; } }), $ = s => document.querySelector(s), esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const TABLES = [['candidates', '후보 설계·성능 결과'], ['simulation_runs', '시뮬레이션 실행 기록'], ['validations', '검증 결과'], ['reviewer_observations', '인간 검토자 관측'], ['episodes', '위기 사례 패널'], ['audit_log', '감사 로그 (재현성 증빙)']];
 const stamp = () => new Date().toISOString().slice(0, 10);
 const safeName = s => String(s || 'dcv').replace(/[^\w가-힣.-]+/g, '_').slice(0, 40);

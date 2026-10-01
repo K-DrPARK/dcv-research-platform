@@ -1,4 +1,4 @@
-# DCV Research Platform v0.5.20
+# DCV Research Platform v0.5.21
 
 > Defense Rigor release: frozen protocol, simultaneous inference, calibration uncertainty propagation, participant-cluster human validation, and human scientific sign-off.
 
@@ -234,3 +234,7 @@ Browser reload now waits until all project loaders are registered; the main anal
 
 ### v0.5.20 reload / report recovery
 Browser reloads use no-store API reads, dashboard cards synchronize to the rendered right-side reference height on desktop, and report figures are hydrated independently so one rendering error cannot hide the complete figure set.
+
+
+### v0.5.21 live-load / interaction recovery
+Initial project data retries automatically, thesis/report controls resolve the DCV core dynamically, desktop cards synchronize to the right-side rendered reference height, and report figures hydrate independently with fallback rendering.

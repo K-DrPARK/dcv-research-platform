@@ -23,12 +23,15 @@ export async function svgToPngBlob(svg, w, h, scale = 3) {
 }
 const blobToU8 = async b => new Uint8Array(await b.arrayBuffer());
 
-const cache = { id: null, thesis: null, figs: null };
-async function loadThesis(force = true) {
+// /thesis 는 D1 을 수천 행 읽는 무거운 집계다. 창을 열 때(renderFigCards)만 새로 받고, 이후 Word/MD/HTML/JSON/ZIP/그림 저장은
+// 90초 동안 받아 둔 사본을 재사용한다(이전: 버튼을 누를 때마다 재조회). 오래된 사본은 자동으로 다시 받는다.
+const THESIS_TTL_MS = 90_000;
+const cache = { id: null, thesis: null, figs: null, at: 0 };
+async function loadThesis(force = false) {
   const id = needProject(); if (!id) throw new Error('no_project');
-  if (!force && cache.id === id && cache.thesis) return cache;
+  if (!force && cache.id === id && cache.thesis && Date.now() - cache.at < THESIS_TTL_MS) return cache;
   const t = await (await authFetch(`/api/projects/${id}/thesis`)).json();
-  Object.assign(cache, { id, thesis: t, figs: buildFigures(t) }); return cache;
+  Object.assign(cache, { id, thesis: t, figs: buildFigures(t), at: Date.now() }); return cache;
 }
 async function loadReportMd() { try { const r = await (await authFetch(`/api/projects/${D.current()}/report`)).json(); return r.content_markdown || null; } catch (e) { if (e.status === 404) return null; throw e; } }
 
@@ -60,7 +63,7 @@ const setStatus = s => { const el = $('#thesisStatus'); if (el) el.textContent =
 
 async function renderFigCards() {
   const box = $('#thesisFigs'); box.innerHTML = '<span class="text-secondary small">불러오는 중…</span>';
-  try { const { figs } = await loadThesis();
+  try { const { figs } = await loadThesis(true);
     box.innerHTML = figs.length ? figs.map(f => `<div class="fig-card"><div class="fig-prev">${f.svg}</div><div class="fig-cap"><b>그림 ${f.label || f.n}.</b> ${esc(f.title)}</div><div class="d-flex gap-2"><button class="btn-ghost" data-act="fig-png" data-n="${f.n}">PNG</button><button class="btn-ghost" data-act="fig-svg" data-n="${f.n}">SVG</button></div></div>`).join('') : '<span class="text-secondary small">표시할 그림이 없습니다. 후보 계산·검토자 관측·사례 패널이 쌓이면 자동으로 나타납니다.</span>';
   } catch (e) { box.innerHTML = `<span class="text-danger small">불러오기 실패: ${esc(e.message)}</span>`; }
 }

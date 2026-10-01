@@ -123,7 +123,7 @@ const arrow = (x1, y1, x2, y2, o = {}) => { const a = Math.atan2(y2 - y1, x2 - x
 const num = v => (v == null || !Number.isFinite(Number(v))) ? '-' : String(Number(v));
 
 export function figFullBlueprint(t) {
-  const W=1120,H=1584,pad=24,gap=16,blue='#0d5f87',blue2='#1383a8',teal='#1aa6a6',orange='#f39a2e',cream='#fff7e5',lite='#edf8fc',pink='#fff0ec',green='#e9f8f2'; let b='';
+  const W=1120,H=1778,pad=24,gap=16,blue='#0d5f87',blue2='#1383a8',teal='#1aa6a6',orange='#f39a2e',cream='#fff7e5',lite='#edf8fc',pink='#fff0ec',green='#e9f8f2'; let b='';
   const title=(x,y,w,no,txt)=>{ b+=box(x,y,w,42,{rx:10,fill:blue,stroke:blue}); b+=rtext(x+14,y+27,`${no}  ${txt}`,{size:18,weight:700,fill:'#fff'}); };
   const txts=(x,y,arr,o={})=>arr.forEach((v,i)=>{b+=rtext(x,y+i*(o.leading||21),v,{size:o.size||13,weight:o.weight||400,fill:o.fill||C.ink,anchor:o.anchor||'start'});});
   // header
@@ -131,12 +131,12 @@ export function figFullBlueprint(t) {
   b+=rtext(W/2,74,'잡음과 승인 지연 하 공공 지급결제 의사결정의 알고리즘 위임 가능 영역 설계',{size:15,weight:700,anchor:'middle',fill:C.mute});
   b+=box(86,92,W-172,44,{rx:18,fill:cream,stroke:'#e7bb69'}); b+=rtext(W/2,120,'핵심 질문: 어떤 조건에서, 어느 범위까지, 어떤 복구장치를 전제로 알고리즘에 집행권한을 위임할 수 있는가?',{size:14,weight:700,anchor:'middle'});
   // section 1 left
-  const x1=24,w1=382,y1=154; title(x1,y1,w1,'1','연구의 핵심 아이디어'); b+=box(x1,y1+50,w1,250,{fill:'#fff',stroke:'#a8d4e6'});
+  const x1=24,w1=382,y1=154; title(x1,y1,w1,'1','연구의 핵심 아이디어'); b+=box(x1,y1+50,w1,300,{fill:'#fff',stroke:'#a8d4e6'});
   txts(x1+18,y1+80,['알고리즘 성능 순위를 비교하는 연구가 아니라,','데이터 품질·정보처리·권한·인간·복구가','결합된 시스템에서 위임 가능 영역 D의','경계를 설계·탐색·검증하는 연구이다.'],{size:13.2,leading:22});
   const sx=[x1+28,x1+145,x1+262], cols=[C.blue,C.ok,C.warn], labs=[['Define','1편: 개념·설계'],['Compute','2편: 계산·강건탐색'],['Validate','3편: 사례·인간검증']];
-  labs.forEach((a,i)=>{b+=box(sx[i],y1+184,94,62,{fill:i===0?'#e8f3fb':i===1?'#e9f8f2':'#fff4dc',stroke:cols[i]}); b+=rtext(sx[i]+47,y1+210,a[0],{size:14,weight:700,anchor:'middle',fill:cols[i]}); b+=rtext(sx[i]+47,y1+230,a[1],{size:10.5,anchor:'middle'}); if(i<2)b+=arrow(sx[i]+94,y1+215,sx[i+1]-6,y1+215,{stroke:'#4d7890'});});
+  labs.forEach((a,i)=>{b+=box(sx[i],y1+220,94,62,{fill:i===0?'#e8f3fb':i===1?'#e9f8f2':'#fff4dc',stroke:cols[i]}); b+=rtext(sx[i]+47,y1+246,a[0],{size:14,weight:700,anchor:'middle',fill:cols[i]}); b+=rtext(sx[i]+47,y1+266,a[1],{size:10.5,anchor:'middle'}); if(i<2)b+=arrow(sx[i]+94,y1+251,sx[i+1]-6,y1+251,{stroke:'#4d7890'});});
   // section 2 right large
-  const x2=x1+w1+gap,w2=W-x2-pad; title(x2,y1,w2,'2','전체 연구모형: 데이터–결정 사슬'); b+=box(x2,y1+50,w2,536,{fill:'#fff',stroke:'#9cc8db'});
+  const x2=x1+w1+gap,w2=W-x2-pad; title(x2,y1,w2,'2','전체 연구모형: 데이터–결정 사슬'); b+=box(x2,y1+50,w2,614,{fill:'#fff',stroke:'#9cc8db'});
   const fbx=x2+56, fw=w2-112; b+=box(fbx,y1+70,fw,50,{fill:'#eef6fa',stroke:blue2}); b+=rtext(fbx+fw/2,y1+92,'환경 불확실성',{size:14,weight:700,anchor:'middle'}); b+=rtext(fbx+fw/2,y1+111,'확률적 충격 · 위기유형 · 계수 불확실성 · 상황변화',{size:11.5,anchor:'middle'});
   const chain=[['① 데이터 품질','정보오차 σ · 시차 τ · 누락 · 이상치','#e8f3fb'],['② 정보 처리','EMA(α) · Kalman · 변화점 · Adaptive','#e9f8f2'],['③ 알고리즘 판단','지급 · 지급정지 · 추가검토 + Confidence','#eef0ff'],['④ 위임 권한 K','K0 인간전결 · K1 승인 · K2 조건부 자동 · K3 광범위 자동','#fff4dc']];
   chain.forEach((r,i)=>{const yy=y1+138+i*72;b+=box(fbx,yy,fw,56,{fill:r[2],stroke:i===3?orange:blue2});b+=rtext(fbx+14,yy+22,r[0],{size:13.5,weight:700});b+=rtext(fbx+14,yy+43,r[1],{size:11.5});if(i<3)b+=arrow(fbx+fw/2,yy+56,fbx+fw/2,yy+72,{stroke:'#557d90'});});
@@ -145,30 +145,30 @@ export function figFullBlueprint(t) {
   b+=box(fbx,yy5+76,fw,58,{fill:pink,stroke:C.bad})+rtext(fbx+14,yy5+98,'⑥ 실제 결과',{size:13,weight:700})+rtext(fbx+14,yy5+119,'손실 L · FP 정지 오판 · FN 정지 누락 · 검토부담 B · 복구시간 T_R',{size:11});
   b+=box(fbx,yy5+152,fw,58,{fill:'#e8f3fb',stroke:blue2})+rtext(fbx+14,yy5+174,'⑦ 복구 규칙',{size:13,weight:700})+rtext(fbx+14,yy5+195,'여유폭 W · 재조정 기준 m · rollback · 재검토 → Feedback Loop',{size:11});
   // section 3 left middle
-  const y3=470; title(x1,y3,w1,'3','수학적 정의와 경험적 손실 보정'); b+=box(x1,y3+50,w1,330,{fill:'#fff',stroke:'#a8d4e6'});
-  b+=box(x1+16,y3+70,w1-32,56,{fill:cream,stroke:'#e9c77b'}); b+=rtext(x1+30,y3+93,'설계벡터',{size:12,weight:700,fill:blue}); b+=rtext(x1+w1/2,y3+116,'x = (σ, τ, α, K, d, W, m, E)',{size:15,weight:700,anchor:'middle',fill:'#d97520'});
-  b+=box(x1+16,y3+142,w1-32,82,{fill:green,stroke:C.ok}); b+=rtext(x1+30,y3+166,'위임 가능 영역 D',{size:12,weight:700,fill:C.ok}); b+=rtext(x1+w1/2,y3+192,'D = { x : P[g_j(x,S) ≤ c_j] ≥ 1−ε_j, ∀j }',{size:12.5,weight:700,anchor:'middle'}); b+=rtext(x1+w1/2,y3+214,'UNRESOLVED ≠ INFEASIBLE',{size:11.5,weight:700,anchor:'middle',fill:C.bad});
-  const lc=t.empirical?.loss_calibration||{}; txts(x1+20,y3+250,['경험적 손실계수 (n='+ (lc.n||0) +')',`FP 정지 오판: c_FP=${fx(lc.c_fp??0,4)}`,`FN 정지 누락: c_FN=${fx(lc.c_fn??0,4)}`,`q95 손실 정규화: ${fx(lc.normalization??0,4)}`],{size:12.5,leading:24,weight:600});
+  const y3=y1+366; title(x1,y3,w1,'3','수학적 정의와 경험적 손실 보정'); b+=box(x1,y3+50,w1,520,{fill:'#fff',stroke:'#a8d4e6'});
+  b+=box(x1+16,y3+72,w1-32,64,{fill:cream,stroke:'#e9c77b'}); b+=rtext(x1+30,y3+96,'설계벡터',{size:12,weight:700,fill:blue}); b+=rtext(x1+w1/2,y3+124,'x = (σ, τ, α, K, d, W, m, E)',{size:15,weight:700,anchor:'middle',fill:'#d97520'});
+  b+=box(x1+16,y3+160,w1-32,104,{fill:green,stroke:C.ok}); b+=rtext(x1+30,y3+186,'위임 가능 영역 D',{size:12,weight:700,fill:C.ok}); b+=rtext(x1+w1/2,y3+222,'D = { x : P[g_j(x,S) ≤ c_j] ≥ 1−ε_j, ∀j }',{size:12.5,weight:700,anchor:'middle'}); b+=rtext(x1+w1/2,y3+249,'UNRESOLVED ≠ INFEASIBLE',{size:11.5,weight:700,anchor:'middle',fill:C.bad});
+  const lc=t.empirical?.loss_calibration||{}; b+=box(x1+16,y3+290,w1-32,260,{fill:'#f7fbfd',stroke:'#c5d8e1'}); txts(x1+34,y3+336,['경험적 손실계수 (n='+ (lc.n||0) +')',`FP 정지 오판: c_FP=${fx(lc.c_fp??0,4)}`,`FN 정지 누락: c_FN=${fx(lc.c_fn??0,4)}`,`q95 손실 정규화: ${fx(lc.normalization??0,4)}`],{size:13,leading:54,weight:600});
   // section 4 right mid table
-  const y4=y1+604; title(x2,y4,w2,'4','제1편 · 제2편 · 제3편 구성'); b+=box(x2,y4+50,w2,206,{fill:'#fff',stroke:'#9cc8db'});
+  const y4=y1+680; title(x2,y4,w2,'4','제1편 · 제2편 · 제3편 구성'); b+=box(x2,y4+50,w2,206,{fill:'#fff',stroke:'#9cc8db'});
   const colsX=[x2+12,x2+68,x2+260,x2+492], widths=[52,190,228,w2-504]; ['편','핵심 질문','방법','산출물'].forEach((h,i)=>{b+=box(colsX[i],y4+62,widths[i],34,{rx:0,fill:'#dfeff6',stroke:'#95b7c7'});b+=rtext(colsX[i]+widths[i]/2,y4+84,h,{size:11.5,weight:700,anchor:'middle'});});
   const rr=[['1편','무엇을 위임 가능하다고 정의?','데이터–결정 사슬·K 정의','개념 틀·명제'],['2편','어떤 조건에서 경계가 형성·붕괴?','교차실험·CDRS·Minimax Regret','위임 가능 영역 지도'],['3편','사례·인간이 달라도 유지?','2차 사례·인간 실험·재계산','일반화·현실 검증']]; rr.forEach((r,j)=>r.forEach((v,i)=>{b+=box(colsX[i],y4+96+j*42,widths[i],42,{rx:0,fill:'#fff',stroke:'#c5d8e1'});b+=rtext(colsX[i]+8,y4+121+j*42,v,{size:i===0?12:10.5,weight:i===0?700:400});}));
   b+=rtext(x2+w2/2,y4+238,'논리 구조: Define  →  Compute  →  Validate  →  Re-compute  →  Confirm',{size:12.5,weight:700,anchor:'middle',fill:blue});
   // section 5 left lower
-  const y5=1028; title(x1,y5,530,'5','제2편 계산 절차와 강건 탐색 (CDRS)'); b+=box(x1,y5+50,530,332,{fill:'#fff',stroke:'#9cc8db'});
+  const y5=y4+256+16; title(x1,y5,530,'5','제2편 계산 절차와 강건 탐색 (CDRS)'); b+=box(x1,y5+50,530,346,{fill:'#fff',stroke:'#9cc8db'});
   const steps=['후보 설계 X 생성','Exploration simulation','명백한 infeasible 제거','경계 후보 탐색','경계부 simulation budget 집중','독립 seed confirmation','Robust scenario 검증','Delegation Feasible Region 도출','Minimax Regret 대표 정책 선택'];
   steps.forEach((st,i)=>{const yy=y5+72+i*28;b+=`<circle cx="${x1+38}" cy="${yy}" r="10" fill="${teal}"/>`+rtext(x1+38,yy+4,String(i+1),{size:10.5,weight:700,fill:'#fff',anchor:'middle'})+box(x1+60,yy-12,235,24,{rx:6,fill:'#f6fbfd',stroke:'#b8d8e5'})+rtext(x1+70,yy+4,st,{size:10.4});});
-  b+=box(x1+318,y5+72,188,108,{fill:'#eef7fb',stroke:blue2})+rtext(x1+332,y5+96,'시나리오 집합 S',{size:13,weight:700,fill:blue})+rtext(x1+332,y5+120,'Historical: 81개 위기 사례',{size:11})+rtext(x1+332,y5+142,'Synthetic: Monte Carlo',{size:11})+rtext(x1+332,y5+164,'Adversarial: ±40% 27조합',{size:11})+rtext(x1+332,y5+174,'Safety first, regret second',{size:11,weight:700,fill:C.bad});
+  b+=box(x1+318,y5+72,188,128,{fill:'#eef7fb',stroke:blue2})+rtext(x1+332,y5+96,'시나리오 집합 S',{size:13,weight:700,fill:blue})+rtext(x1+332,y5+120,'Historical: 81개 위기 사례',{size:11})+rtext(x1+332,y5+142,'Synthetic: Monte Carlo',{size:11})+rtext(x1+332,y5+164,'Adversarial: ±40% 27조합',{size:11})+rtext(x1+332,y5+190,'Safety first, regret second',{size:11,weight:700,fill:C.bad});
   // mini region plot
-  b+=box(x1+318,y5+194,188,118,{fill:'#fbfbfb',stroke:'#c5d8e1'}); b+=`<path d="M ${x1+334} ${y5+286} Q ${x1+385} ${y5+222} ${x1+480} ${y5+212} L ${x1+490} ${y5+300} L ${x1+334} ${y5+300} Z" fill="#a9e0d1" opacity=".8"/><path d="M ${x1+334} ${y5+270} Q ${x1+400} ${y5+235} ${x1+490} ${y5+252}" fill="none" stroke="${C.bad}" stroke-dasharray="5 4"/>`; b+=rtext(x1+348,y5+326,'위임 가능 영역 / 경계 / 금지 영역',{size:10.5});
+  b+=box(x1+318,y5+214,188,118,{fill:'#fbfbfb',stroke:'#c5d8e1'}); b+=`<path d="M ${x1+334} ${y5+302} Q ${x1+385} ${y5+238} ${x1+480} ${y5+228} L ${x1+490} ${y5+316} L ${x1+334} ${y5+316} Z" fill="#a9e0d1" opacity=".8"/><path d="M ${x1+334} ${y5+286} Q ${x1+400} ${y5+251} ${x1+490} ${y5+268}" fill="none" stroke="${C.bad}" stroke-dasharray="5 4"/>`; b+=rtext(x1+348,y5+356,'위임 가능 영역 / 경계 / 금지 영역',{size:10.5});
   // section 6 right lower
-  const x6=x1+546,w6=W-x6-pad; title(x6,y5,w6,'6','제3편 인간 검토자 실험'); b+=box(x6,y5+50,w6,332,{fill:'#fff',stroke:'#9cc8db'});
+  const x6=x1+546,w6=W-x6-pad; title(x6,y5,w6,'6','제3편 인간 검토자 실험'); b+=box(x6,y5+50,w6,346,{fill:'#fff',stroke:'#9cc8db'});
   txts(x6+18,y5+80,['실험요인: AI Confidence(저/중/고) × AI 정오(정답/오답)','× 시간압박 또는 승인 지연(낮음/높음)'],{size:12,leading:22});
   b+=rtext(x6+18,y5+136,'핵심 행동지표',{size:13,weight:700,fill:blue}); txts(x6+30,y5+158,['Primary 1: Appropriate Reliance Rate (ARR)','Primary 2: Error Recovery Time (ERT)','Secondary: AI 오답 수용률 / 불필요 개입률','Operational: Review Burden'],{size:11.5,leading:20});
   const mx=x6+18,my=y5+246,mw=(w6-46)/2,mh=36; [['AI 정답·수용','적절한 의존',green],['AI 정답·개입','과소 의존',cream],['AI 오류·수용','과잉 의존',pink],['AI 오류·개입','적절한 개입',green]].forEach((r,i)=>{const xx=mx+(i%2)*(mw+10),yy=my+Math.floor(i/2)*(mh+8);b+=box(xx,yy,mw,mh,{fill:r[2],stroke:'#a8c7d5'})+rtext(xx+mw/2,yy+15,r[0],{size:10.5,anchor:'middle',weight:700})+rtext(xx+mw/2,yy+30,r[1],{size:10.5,anchor:'middle'});});
-  b+=rtext(x6+w6/2,y5+324,'Ideal Reviewer Region  ⟶  Empirical Reviewer Region',{size:11.5,weight:700,anchor:'middle',fill:blue});
+  b+=rtext(x6+w6/2,y5+368,'Ideal Reviewer Region  ⟶  Empirical Reviewer Region',{size:11.5,weight:700,anchor:'middle',fill:blue});
   // section 7 bottom
-  const y7=1380; title(pad,y7,W-2*pad,'7','핵심 연구명제와 기대 기여'); b+=box(pad,y7+50,W-2*pad,146,{fill:'#fff',stroke:'#9cc8db'});
+  const y7=y5+396+16; title(pad,y7,W-2*pad,'7','핵심 연구명제와 기대 기여'); b+=box(pad,y7+50,W-2*pad,146,{fill:'#fff',stroke:'#9cc8db'});
   txts(pad+18,y7+82,['P1  정보오차 ↑ → 위임 가능 영역 축소','P2  데이터 품질·정보처리·권한·지연 사이 교호작용','P3  복구 여유폭 ↔ 재조정 빈도·손실 노출 trade-off','P4  인간 검토자의 편향·오류·지연 → 경계 재조정'],{size:11.7,leading:25,weight:600});
   txts(W/2+20,y7+82,['이론  데이터–결정 사슬과 위임 가능 영역 개념화','방법  제약기반 강건 탐색·확인 절차','실증  81개 위기 사례 + 인간 검토자 검증','실무  증거 기반 위임 설계 기준'],{size:11.7,leading:25,weight:600});
   b+=box(78,H-48,W-156,32,{rx:12,fill:'#103f63',stroke:'#103f63'})+rtext(W/2,H-27,'결론: 알고리즘 위임은 AI 정확도의 문제가 아니라 정보–처리–권한–인간–복구가 결합된 시스템 설계 문제이다.',{size:13.2,weight:700,anchor:'middle',fill:'#fff'});

@@ -19,7 +19,7 @@ async function api(request,env){
   const auth=requireAdmin(request,env); if(auth) return auth;
 
   if(url.pathname==='/api/projects' && method==='GET'){
-    const rows=await all(env.DB,`SELECT p.*, (SELECT COUNT(*) FROM design_candidates c WHERE c.project_id=p.id) candidate_count, (SELECT COUNT(*) FROM approvals a WHERE a.project_id=p.id) approval_count FROM projects p ORDER BY created_at DESC`);
+    const rows=await all(env.DB,`SELECT p.*, (SELECT COUNT(*) FROM approvals a WHERE a.project_id=p.id) approval_count FROM projects p ORDER BY created_at DESC`);
     return json({projects:rows});
   }
   if(url.pathname==='/api/projects' && method==='POST'){
@@ -48,10 +48,9 @@ async function api(request,env){
       const jobs=await all(env.DB,`SELECT type,status,attempts,last_error,created_at,updated_at FROM jobs WHERE project_id=? ORDER BY created_at DESC LIMIT 20`,[projectId]);
       const runs=await one(env.DB,`SELECT COUNT(*) total,SUM(CASE WHEN phase='exploration' THEN 1 ELSE 0 END) exploration,SUM(CASE WHEN phase='refinement' THEN 1 ELSE 0 END) refinement,SUM(CASE WHEN phase='confirmation' THEN 1 ELSE 0 END) confirmation,SUM(CASE WHEN phase IN ('historical','stress') THEN 1 ELSE 0 END) robust FROM simulation_runs WHERE project_id=?`,[projectId]);
       const scenarios=await one(env.DB,`SELECT COUNT(*) total,SUM(CASE WHEN scenario_type='historical' THEN 1 ELSE 0 END) historical,SUM(CASE WHEN scenario_type='adversarial' THEN 1 ELSE 0 END) adversarial FROM scenarios WHERE project_id=?`,[projectId]);
-      const human=await one(env.DB,`SELECT COUNT(*) n FROM reviewer_observations WHERE project_id=?`,[projectId]);
       const empirical=await empiricalReadiness(env,projectId);
       const protocol=await latestProtocol(env,projectId);
-      return json({project:p,definition:def?{...def,gate:safeJson(def.gate_json,{}),content:safeJson(def.content_json,{}),ai:safeJson(def.ai_note,{})}:null,measurement:meas?{...meas,metrics:safeJson(meas.metrics_json,{}),quality:safeJson(meas.quality_json,{})}:null,candidates:counts,approval:app?{...app,basis:safeJson(app.basis_json,{})}:null,reviewer:reviewer?{...reviewer,model:safeJson(reviewer.model_json,{})}:null,jobs,runs,scenarios,human_reviews:Number(human?.n||0),empirical,protocol});
+      return json({project:p,definition:def?{...def,gate:safeJson(def.gate_json,{}),content:safeJson(def.content_json,{}),ai:safeJson(def.ai_note,{})}:null,measurement:meas?{...meas,metrics:safeJson(meas.metrics_json,{}),quality:safeJson(meas.quality_json,{})}:null,candidates:counts,approval:app?{...app,basis:safeJson(app.basis_json,{})}:null,reviewer:reviewer?{...reviewer,model:safeJson(reviewer.model_json,{})}:null,jobs,runs,scenarios,human_reviews:Number(p.reviewer_obs_count||0),empirical,protocol});
     }
     if(parts[3]==='run' && method==='POST'){ await run(env.DB,`UPDATE projects SET reviewer_hold_marker=NULL WHERE id=?`,[projectId]); const r=await advanceProject(env,projectId); return json({advance:r,transport:env.CDRS_QUEUE?'cloudflare-queue':'d1-fallback'}); }
     if(parts[3]==='sources' && method==='GET'){ return json({sources:await all(env.DB,`SELECT * FROM data_sources WHERE project_id=? ORDER BY created_at DESC`,[projectId])}); }
@@ -67,7 +66,10 @@ async function api(request,env){
     }
     if(parts[3]==='reviewer-observations' && method==='POST'){
       const b=await bodyJson(request); const id=uid('review');
-      await run(env.DB,`INSERT INTO reviewer_observations(id,project_id,participant_hash,ai_confidence,ai_correct,human_accept,response_ms,recovered,recovery_ms,context_json,created_at) VALUES(?,?,?,?,?,?,?,?,?,?,?)`,[id,projectId,String(b.participant_hash||'anon'),Number(b.ai_confidence),b.ai_correct?1:0,b.human_accept?1:0,Number(b.response_ms||0),b.recovered?1:0,b.recovery_ms==null?null:Number(b.recovery_ms),JSON.stringify(b.context||{}),nowIso()]);
+      await env.DB.batch([   // 관측 INSERT + 프로젝트 카운터 증가를 한 batch(원자적)로
+        env.DB.prepare(`INSERT INTO reviewer_observations(id,project_id,participant_hash,ai_confidence,ai_correct,human_accept,response_ms,recovered,recovery_ms,context_json,created_at) VALUES(?,?,?,?,?,?,?,?,?,?,?)`).bind(id,projectId,String(b.participant_hash||'anon'),Number(b.ai_confidence),b.ai_correct?1:0,b.human_accept?1:0,Number(b.response_ms||0),b.recovered?1:0,b.recovery_ms==null?null:Number(b.recovery_ms),JSON.stringify(b.context||{}),nowIso()),
+        env.DB.prepare(`UPDATE projects SET reviewer_obs_count=reviewer_obs_count+1 WHERE id=?`).bind(projectId)
+      ]);
       await enqueueOnce(env,projectId,'advance_project',{},99,30); return json({id},201);   // 관측 N건 → advance 1건으로 병합
     }
     if(parts[3]==='scenarios' && method==='GET'){ return json({scenarios:await all(env.DB,`SELECT * FROM scenarios WHERE project_id=? ORDER BY scenario_type,name`,[projectId])}); }

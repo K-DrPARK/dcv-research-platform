@@ -35,7 +35,8 @@ export async function buildThesisData(env, projectId) {
   const candRows = await all(env.DB, `SELECT c.*, ${CLASS_SQL} AS klass FROM design_candidates c WHERE c.project_id=?`, [projectId]);
   const cands = candRows.map(c => ({ id: c.id, sigma: r4(c.sigma), tau: c.tau, alpha: r4(c.alpha), K: c.authority_k, d: c.delay_d, W: r4(c.recovery_w), m: r4(c.adjust_m), estimator: c.estimator || 'ema', status: c.status, evidence_status: c.evidence_status, klass: c.klass, boundary_score: r4(c.boundary_score), max_regret: r4(c.max_regret), objective_score: r4(c.objective_score) }));
 
-  const runRows = await all(env.DB, `SELECT candidate_id,phase,n,loss_mean,loss_exceed_rate,fp_rate,fn_rate,review_burden,recovery_time,regret,created_at FROM simulation_runs WHERE project_id=? ORDER BY created_at`, [projectId]);
+  // simulation_runs 는 한 번만 읽는다(이전: 이 조회 + 단계별 집계 조회로 2회 스캔). decisions 는 단계별 집계용으로 함께 꺼낸다.
+  const runRows = await all(env.DB, `SELECT candidate_id,phase,n,loss_mean,loss_exceed_rate,fp_rate,fn_rate,review_burden,recovery_time,regret,created_at,COALESCE(json_extract(result_json,'$.decisions'),0) AS decisions FROM simulation_runs WHERE project_id=? ORDER BY created_at`, [projectId]);
   const best = new Map(), byCandPhase = new Map();
   for (const r of runRows) {
     byCandPhase.set(`${r.candidate_id}|${r.phase}`, r);
@@ -65,20 +66,30 @@ export async function buildThesisData(env, projectId) {
   const selectedEvidence = selectedId ? await one(env.DB, `SELECT result_json FROM simulation_runs WHERE project_id=? AND candidate_id=? AND phase IN ('confirmation','historical','stress') ORDER BY CASE phase WHEN 'stress' THEN 3 WHEN 'historical' THEN 2 ELSE 1 END DESC, created_at DESC LIMIT 1`, [projectId,selectedId]) : null;
   const selectedInference = safeJson(selectedEvidence?.result_json,{}).inference || null;
 
-  const phases = await all(env.DB, `SELECT phase, COUNT(*) runs, SUM(n) episodes, SUM(COALESCE(json_extract(result_json,'$.decisions'),0)) decisions FROM simulation_runs WHERE project_id=? GROUP BY phase ORDER BY phase`, [projectId]);
+  const phaseAgg = new Map();
+  for (const r of runRows) { const e = phaseAgg.get(r.phase) || { phase: r.phase, runs: 0, episodes: 0, decisions: 0 }; e.runs++; e.episodes += Number(r.n) || 0; e.decisions += Number(r.decisions) || 0; phaseAgg.set(r.phase, e); }
+  const phases = [...phaseAgg.values()].sort((a, b) => (a.phase < b.phase ? -1 : a.phase > b.phase ? 1 : 0));
   const validations = await all(env.DB, `SELECT validation_type, status, COUNT(*) n FROM validations WHERE project_id=? GROUP BY validation_type, status ORDER BY validation_type, status`, [projectId]);
   const scenarios = await one(env.DB, `SELECT COUNT(*) total, SUM(CASE WHEN scenario_type='historical' THEN 1 ELSE 0 END) historical, SUM(CASE WHEN scenario_type='adversarial' THEN 1 ELSE 0 END) adversarial FROM scenarios WHERE project_id=?`, [projectId]);
 
-  // 인간 검토자 (행 단위 대신 SQL 집계 — 무료 플랜 CPU 절약)
-  const rvTot = await one(env.DB, `SELECT COUNT(*) n, COUNT(DISTINCT participant_hash) participants, AVG(response_ms) mean_rt,
-    SUM(CASE WHEN (ai_correct=1 AND human_accept=1) OR (ai_correct=0 AND human_accept=0) THEN 1 ELSE 0 END) appropriate,
-    SUM(CASE WHEN ai_correct=0 THEN 1 ELSE 0 END) wrong_n, SUM(CASE WHEN ai_correct=0 AND human_accept=1 THEN 1 ELSE 0 END) wrong_accept,
-    SUM(CASE WHEN ai_correct=1 THEN 1 ELSE 0 END) right_n, SUM(CASE WHEN ai_correct=1 AND human_accept=0 THEN 1 ELSE 0 END) right_override
-    FROM reviewer_observations WHERE project_id=?`, [projectId]);
-  const confRows = await all(env.DB, `SELECT ROUND(ai_confidence,2) confidence, COUNT(*) n, SUM(CASE WHEN ai_correct=1 THEN 1 ELSE 0 END) correct_n,
-    SUM(CASE WHEN ai_correct=1 AND human_accept=1 THEN 1 ELSE 0 END) acc_c, SUM(CASE WHEN ai_correct=0 THEN 1 ELSE 0 END) wrong_n,
-    SUM(CASE WHEN ai_correct=0 AND human_accept=1 THEN 1 ELSE 0 END) acc_w, AVG(response_ms) mean_rt
-    FROM reviewer_observations WHERE project_id=? GROUP BY ROUND(ai_confidence,2) ORDER BY confidence`, [projectId]);
+  // 인간 검토자: reviewer_observations 를 한 번만 스캔한다(이전: 전체 집계 + 신뢰도별 집계로 2회 스캔).
+  // (신뢰도 구간 × 참가자)로 묶어 가져오면 행 수는 구간수×참가자수로 줄고, 합계·참가자 수·구간별 값을 모두 여기서 만든다.
+  const rvRows = await all(env.DB, `SELECT ROUND(ai_confidence,2) confidence, participant_hash ph, COUNT(*) n, SUM(response_ms) rt,
+    SUM(CASE WHEN ai_correct=1 THEN 1 ELSE 0 END) correct_n, SUM(CASE WHEN ai_correct=1 AND human_accept=1 THEN 1 ELSE 0 END) acc_c,
+    SUM(CASE WHEN ai_correct=0 THEN 1 ELSE 0 END) wrong_n, SUM(CASE WHEN ai_correct=0 AND human_accept=1 THEN 1 ELSE 0 END) acc_w,
+    SUM(CASE WHEN ai_correct=1 AND human_accept=0 THEN 1 ELSE 0 END) right_override,
+    SUM(CASE WHEN (ai_correct=1 AND human_accept=1) OR (ai_correct=0 AND human_accept=0) THEN 1 ELSE 0 END) appropriate
+    FROM reviewer_observations WHERE project_id=? GROUP BY ROUND(ai_confidence,2), participant_hash`, [projectId]);
+  const rvT = { n: 0, rt: 0, appropriate: 0, wrong_n: 0, wrong_accept: 0, right_n: 0, right_override: 0 }, rvParticipants = new Set(), confMap = new Map();
+  for (const g of rvRows) {
+    const n = Number(g.n) || 0; rvT.n += n; rvT.rt += Number(g.rt) || 0; rvT.appropriate += Number(g.appropriate) || 0;
+    rvT.wrong_n += Number(g.wrong_n) || 0; rvT.wrong_accept += Number(g.acc_w) || 0; rvT.right_n += Number(g.correct_n) || 0; rvT.right_override += Number(g.right_override) || 0;
+    rvParticipants.add(g.ph);
+    const k = g.confidence, e = confMap.get(k) || { confidence: k, n: 0, rt: 0, correct_n: 0, acc_c: 0, wrong_n: 0, acc_w: 0 };
+    e.n += n; e.rt += Number(g.rt) || 0; e.correct_n += Number(g.correct_n) || 0; e.acc_c += Number(g.acc_c) || 0; e.wrong_n += Number(g.wrong_n) || 0; e.acc_w += Number(g.acc_w) || 0; confMap.set(k, e);
+  }
+  const rvTot = { n: rvT.n, participants: rvParticipants.size, mean_rt: rvT.n ? rvT.rt / rvT.n : null, appropriate: rvT.appropriate, wrong_n: rvT.wrong_n, wrong_accept: rvT.wrong_accept, right_n: rvT.right_n, right_override: rvT.right_override };
+  const confRows = [...confMap.values()].sort((a, b) => a.confidence - b.confidence).map(e => ({ ...e, mean_rt: e.n ? e.rt / e.n : null }));
   const N = k => Number(rvTot?.[k] || 0);
   const byConfidence = confRows.map(e => ({ confidence: Number(e.confidence), n: e.n, correct_n: Number(e.correct_n), wrong_n: Number(e.wrong_n), accept_when_correct: ci(Number(e.acc_c), Number(e.correct_n)), accept_when_wrong: ci(Number(e.acc_w), Number(e.wrong_n)), mean_rt_ms: r4(e.mean_rt) }));
   const reviewer = {

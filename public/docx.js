@@ -66,7 +66,7 @@ function drawing(rid, id, name, alt, cx, cy) {
  *   images 키 = 그림 파일명(확장자 제외, 예: fig1_feasible_region_heatmap). w/h = 원본 SVG 픽셀 크기(비율 계산용).
  * @returns {Uint8Array} .docx 바이트
  */
-export function buildDocx(md, { images = {}, title, author = 'DCV Research Platform', created = new Date(), maxWidthCm = 15.5 } = {}) {
+export function buildDocx(md, { images = {}, title, author = 'DCV Research Platform', created = new Date(), maxWidthCm = 15.5, maxHeightCm = 22.5 } = {}) {
   const lines = String(md).replace(/\r/g, '').split('\n'), body = [], media = []; let i = 0, firstH1 = true, imgId = 0; const hasTitle = /^#\s/m.test(md);
   const docTitle = title || (/^#\s+(.+)$/m.exec(md) || [, 'DCV 연구 보고서'])[1];
   while (i < lines.length) {
@@ -77,7 +77,7 @@ export function buildDocx(md, { images = {}, title, author = 'DCV Research Platf
     if ((m = /^!\[(.*?)\]\((.*?)\)\s*$/.exec(l))) {
       const key = (m[2].split('/').pop() || '').replace(/\.\w+$/, ''), im = images[key]; i++;
       if (im && im.data && im.w > 0 && im.h > 0) {
-        const cxMax = Math.round(maxWidthCm * 360000), cx = Math.min(cxMax, Math.round(im.w * 9525)), cy = Math.round(cx * im.h / im.w), rid = `rIdImg${++imgId}`;
+        const cxMax = Math.round(maxWidthCm * 360000), cx0 = Math.min(cxMax, Math.round(im.w * 9525)), cx = Math.min(cx0, Math.round(maxHeightCm * 360000 * im.w / im.h)), cy = Math.round(cx * im.h / im.w), rid   /* 세로로 긴 그림(M0)이 페이지 본문 높이를 넘지 않도록 높이 상한 적용 */ = `rIdImg${++imgId}`;
         media.push({ rid, name: `image${imgId}.png`, data: im.data }); body.push(para(drawing(rid, imgId, key, m[1], cx, cy), { jc: 'center', keepNext: true, spacing: '<w:spacing w:before="160" w:after="40"/>' }));
       } else body.push(para(run(`[그림 누락: ${m[1]}]`, { i: true, color: '888888' }), { jc: 'center' }));
       continue;

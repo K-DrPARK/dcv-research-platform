@@ -1,7 +1,10 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { makeDb } from './helpers/d1shim.mjs';
-import { enqueue, enqueueOnce, claimJobs } from '../src/lib/db.js';
+import { enqueue, enqueueOnce, claimJobs, finishJob, wakeDueJobs } from '../src/lib/db.js';
+import { seedProject } from './helpers/seed.mjs';
+import { buildThesisData } from '../src/lib/thesis.js';
+import worker from '../src/index.js';
 import { advanceProject, scheduleAll } from '../src/lib/orchestrator.js';
 import { cached, bust } from '../src/lib/memo.js';
 
@@ -75,4 +78,67 @@ test('memo is per-DB, expires, and is busted on writes', async () => {
   assert.equal(await cached(b, 'p', 'k', load), 2, 'different DB binding must not share cache');
   bust(a, 'p'); assert.equal(await cached(a, 'p', 'k', load), 3);
   assert.equal(await cached(a, 'p', 'k2', load, -1), 4); assert.equal(await cached(a, 'p', 'k2', load, -1), 5, 'ttl<=0 never hits');
+});
+
+// ---------------------------------------------------------------- v0.5.2
+const fakeQueue = () => { const sent = []; return { sent, send: async (body, opts) => { sent.push({ body, delay: opts?.delaySeconds }); }, sendBatch: async (msgs, opts) => { for (const m of msgs) sent.push({ body: m.body, delay: opts?.delaySeconds }); } }; };
+
+test('queue message is delayed exactly like run_after (no early wake-up that leaves the job stranded)', async () => {
+  const db = makeDb(), q = fakeQueue(), env = { DB: db, CDRS_QUEUE: q }; await project(db);
+  await enqueue(env, 'p1', 'advance_project', {}, 98, 5);
+  await enqueue(env, 'p1', 'x', {}, 10);
+  assert.equal(q.sent[0].delay, 5); assert.equal(q.sent[1].delay, undefined);
+  // 큰 지연도 Queues 상한(12h) 안으로 제한
+  await enqueue(env, 'p1', 'y', {}, 10, 10 * 86400); assert.equal(q.sent[2].delay, 43200);
+});
+
+test('a failed job that will be retried gets a wake-up message at its backoff time', async () => {
+  const db = makeDb(), q = fakeQueue(), env = { DB: db, CDRS_QUEUE: q }; await project(db);
+  await enqueue(env, 'p1', 'x', {}, 10); q.sent.length = 0;
+  const [job] = await claimJobs(env, 1);
+  await finishJob(env, job, new Error('boom'));
+  assert.equal(q.sent.length, 1); assert.equal(q.sent[0].body.job_id, job.id); assert.equal(q.sent[0].delay, 60);   // 30*2^1
+  const row = db.raw.prepare(`SELECT status FROM jobs WHERE id=?`).get(job.id); assert.equal(row.status, 'queued');
+});
+
+test('cron wakes stranded due jobs (queued, due, but no message) and leaves not-yet-due jobs alone', async () => {
+  const db = makeDb(), q = fakeQueue(), env = { DB: db, CDRS_QUEUE: q }; await project(db);
+  const t = (ms) => new Date(Date.now() + ms).toISOString();
+  const ins = (id, runAfter) => db.raw.prepare(`INSERT INTO jobs(id,project_id,type,status,priority,payload_json,run_after,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?)`).run(id, 'p1', 'advance_project', 'queued', 98, '{}', runAfter, now(), now());
+  ins('due1', t(-60000)); ins('later', t(3600000));
+  assert.equal(await wakeDueJobs(env), 1);
+  assert.deepEqual(q.sent.map(m => m.body.job_id), ['due1']);
+  // scheduleAll 이 큐 전송 방식에서도 같은 안전망을 쓴다
+  q.sent.length = 0; const r = await scheduleAll(env);
+  assert.equal(r.transport, 'cloudflare-queue'); assert.ok(q.sent.some(m => m.body.job_id === 'due1'));
+  // 큐가 없으면(D1 fallback) 아무것도 보내지 않는다
+  assert.equal(await wakeDueJobs({ DB: db }), 0);
+  // 읽기 상한: 방치 job 이 아무리 많아도 Cron 1회에 limit 행까지만 읽는다
+  for (let i = 0; i < 40; i++) ins('s' + i, t(-1000));
+  assert.equal(await wakeDueJobs(env, 10), 10);
+  assert.match(plan(db, `SELECT id,project_id,type FROM jobs WHERE status='queued' AND run_after<=? ORDER BY priority ASC, created_at ASC LIMIT ?`, 'x', 10), /idx_jobs_claim/);
+});
+
+test('buildThesisData scans simulation_runs and reviewer_observations once each (no duplicate aggregates)', async () => {
+  const db = makeDb(); const pid = await seedProject(db, { candidates: 30, reviewer: 50, episodes: 10 });
+  const log = []; const wrapped = { ...db, prepare: sql => { log.push(sql); return db.prepare(sql); } };
+  await buildThesisData({ DB: wrapped }, pid);
+  const n = re => log.filter(q => re.test(q)).length;
+  assert.equal(n(/FROM reviewer_observations/i), 1);
+  assert.ok(n(/FROM simulation_runs/i) <= 2, 'one full read + at most the selected-candidate evidence lookup');
+  assert.equal(n(/GROUP BY phase/i), 0);
+});
+
+test('reviewer observation counter: POST increments it atomically and project detail reads it without a COUNT scan', async () => {
+  const db = makeDb(), env = { DB: db, ADMIN_TOKEN: 't', ASSETS: { fetch: async () => new Response('x') } }; await project(db);
+  const call = (path, init = {}) => worker.fetch(new Request('https://x' + path, { ...init, headers: { authorization: 'Bearer t', 'content-type': 'application/json' } }), env, { waitUntil() {} });
+  for (let i = 0; i < 3; i++) { const r = await call('/api/projects/p1/reviewer-observations', { method: 'POST', body: JSON.stringify({ participant_hash: 'a' + i, ai_confidence: .7, ai_correct: true, human_accept: true, response_ms: 500 }) }); assert.equal(r.status, 201); }
+  assert.equal(db.raw.prepare(`SELECT reviewer_obs_count n FROM projects WHERE id='p1'`).get().n, 3);
+  const d = await (await call('/api/projects/p1')).json(); assert.equal(d.human_reviews, 3);
+  const list = await (await call('/api/projects')).json(); assert.equal(list.projects[0].candidate_count, 0);
+});
+
+test('seeded candidates update projects.candidate_count in the same batch', async () => {
+  const db = makeDb(); const pid = await seedProject(db, { candidates: 12, reviewer: 5, episodes: 3 });
+  const p = db.raw.prepare(`SELECT candidate_count c, reviewer_obs_count r FROM projects WHERE id=?`).get(pid); assert.deepEqual({ ...p }, { c: 12, r: 5 });
 });

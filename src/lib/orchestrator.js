@@ -1,4 +1,4 @@
-import { claimJobs, finishJob, enqueue, enqueueOnce, pruneJobs, all, one, run, audit } from './db.js';
+import { claimJobs, finishJob, enqueue, enqueueOnce, pruneJobs, wakeDueJobs, all, one, run, audit } from './db.js';
 import { defineProject } from './define.js';
 import { collectProject } from './collectors.js';
 import { measureProject } from './measure.js';
@@ -168,5 +168,6 @@ export async function scheduleAll(env){
   }
   // 끝난 job 정리는 하루 4회(UTC 0/6/12/18시 첫 Cron)만 — 전용 인덱스를 두면 매 job 상태 변경마다 쓰기가 늘어난다.
   { const t=new Date(); if(t.getUTCHours()%6===0 && t.getUTCMinutes()<15){ try{ await pruneJobs(env); }catch(_){} } }
-  return env.CDRS_QUEUE ? {scheduled:ps.length,transport:'cloudflare-queue'} : processJobs(env);
+  if(env.CDRS_QUEUE){ const woke=await wakeDueJobs(env); return {scheduled:ps.length,woke,transport:'cloudflare-queue'}; }
+  return processJobs(env);
 }

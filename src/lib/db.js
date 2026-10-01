@@ -9,13 +9,25 @@ export async function audit(env, projectId, actor, action, entityType=null, enti
     [uid('audit'), projectId, actor, action, entityType, entityId, JSON.stringify(detail), nowIso()]);
 }
 
+const MAX_QUEUE_DELAY = 43200;   // Cloudflare Queues delaySeconds 상한(12시간)
+async function sendWake(env, bodies, delaySeconds=0) {
+  if (!env.CDRS_QUEUE || !bodies.length) return;
+  const opts = delaySeconds > 0 ? { delaySeconds: Math.min(MAX_QUEUE_DELAY, Math.ceil(delaySeconds)) } : undefined;
+  try {
+    if (bodies.length === 1) await env.CDRS_QUEUE.send(bodies[0], opts);
+    else for (let i=0;i<bodies.length;i+=100) await env.CDRS_QUEUE.sendBatch(bodies.slice(i,i+100).map(body=>({body})), opts);
+  } catch (_) {}
+}
+
 export async function enqueue(env, projectId, type, payload={}, priority=100, delaySeconds=0) {
   const t = new Date(Date.now()+delaySeconds*1000).toISOString();
   const id=uid('job'), now=nowIso();
   await run(env.DB, `INSERT INTO jobs(id,project_id,type,status,priority,payload_json,phase,run_after,created_at,updated_at) VALUES(?,?,?,'queued',?,?,?,?,?,?)`,
     [id, projectId, type, priority, JSON.stringify(payload), payload?.phase ?? null, t, now, now]);
   // Queue is the execution transport; D1 remains the durable source of truth and fallback queue.
-  if (env.CDRS_QUEUE) { try { await env.CDRS_QUEUE.send({ job_id:id, project_id:projectId, type }); } catch (_) {} }
+  // 메시지도 run_after 와 같은 시각에 도착시킨다. 지연 없이 보내면 컨슈머가 아직 due 가 아닌 job 을 못 집고 ack 해,
+  // 그 job 은 다음 메시지가 올 때까지 방치된다(enqueueOnce 가 중복 생성을 막으므로 되살릴 경로도 없다).
+  await sendWake(env, [{ job_id:id, project_id:projectId, type }], delaySeconds);
   return id;
 }
 
@@ -42,9 +54,7 @@ export async function enqueueMany(env, projectId, type, payloads=[], priority=10
   if (!payloads.length) return 0;
   const now = nowIso(), ids = payloads.map(()=>uid('job'));
   await env.DB.batch(payloads.map((pl,i)=>env.DB.prepare(`INSERT INTO jobs(id,project_id,type,status,priority,payload_json,phase,run_after,created_at,updated_at) VALUES(?,?,?,'queued',?,?,?,?,?,?)`).bind(ids[i], projectId, type, priority, JSON.stringify(pl), pl?.phase ?? null, now, now, now)));
-  if (env.CDRS_QUEUE) {
-    try { for (let i=0;i<ids.length;i+=100) await env.CDRS_QUEUE.sendBatch(ids.slice(i,i+100).map(id=>({body:{job_id:id, project_id:projectId, type}}))); } catch (_) {}
-  }
+  await sendWake(env, ids.map(id=>({ job_id:id, project_id:projectId, type })));
   return ids.length;
 }
 
@@ -66,9 +76,12 @@ export async function finishJob(env, job, error=null) {
   }
   const max = job.max_attempts || 5;
   const retry = (job.attempts || 1) < max;
-  const next = new Date(Date.now() + Math.min(3600, 30*Math.pow(2, job.attempts || 1))*1000).toISOString();
+  const backoff = Math.min(3600, 30*Math.pow(2, job.attempts || 1));
+  const next = new Date(Date.now() + backoff*1000).toISOString();
   await run(env.DB, `UPDATE jobs SET status=?, run_after=?, locked_at=NULL, last_error=?, updated_at=? WHERE id=?`,
     [retry?'queued':'failed', next, String(error).slice(0,2000), nowIso(), job.id]);
+  // 재시도 job 에도 깨우기 메시지를 예약(이전에는 다음 무관한 메시지가 올 때까지 방치될 수 있었다)
+  if (retry) await sendWake(env, [{ job_id:job.id, project_id:job.project_id, type:job.type }], backoff);
 }
 
 // 끝난 job 행은 더 이상 쓰이지 않지만 jobs 테이블을 계속 키워 모든 jobs 스캔/집계의 비용을 올린다.
@@ -76,4 +89,13 @@ export async function pruneJobs(env, days=3) {
   const cutoff = new Date(Date.now()-days*86400000).toISOString();
   const r = await run(env.DB, `DELETE FROM jobs WHERE status='done' AND updated_at<?`, [cutoff]);
   return r.meta?.changes || 0;
+}
+
+// 안전망: due 상태인데 깨우는 메시지가 없는 queued job(메시지 유실, 지연 메시지 이전 배포분 등)에 메시지를 다시 보낸다.
+// 인덱스(idx_jobs_claim) 순서로 최대 limit 행만 읽으므로 Cron 1회당 읽기는 많아야 limit 행.
+export async function wakeDueJobs(env, limit=10) {
+  if (!env.CDRS_QUEUE) return 0;
+  const rows = await all(env.DB, `SELECT id,project_id,type FROM jobs WHERE status='queued' AND run_after<=? ORDER BY priority ASC, created_at ASC LIMIT ?`, [nowIso(), limit]);
+  await sendWake(env, rows.map(r=>({ job_id:r.id, project_id:r.project_id, type:r.type })));
+  return rows.length;
 }

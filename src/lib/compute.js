@@ -249,7 +249,7 @@ export async function seedCandidates(env,projectId){
   if(Number.isFinite(Number(op.approval_delay_days)))d.d=robustGrid(Number(op.approval_delay_days),0,30,false);
   const combos=sampleDesign(d,Number(d.max_candidates||128),hashString(`${projectId}:design`)); const now=nowIso(); const candIds=combos.map(()=>uid('cand'));
   const stmts=combos.map((x,i)=>env.DB.prepare(`INSERT INTO design_candidates(id,project_id,sigma,tau,alpha,authority_k,delay_d,recovery_w,adjust_m,status,estimator,evidence_status,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,'pending',?,'pending',?,?)`).bind(candIds[i],projectId,x.sigma,x.tau,x.alpha,x.K,x.d,x.W,x.m,x.estimator,now,now));
-  if(stmts.length)await env.DB.batch(stmts);
+  if(stmts.length)await env.DB.batch([...stmts,env.DB.prepare(`UPDATE projects SET candidate_count=? WHERE id=?`).bind(stmts.length,projectId)]);   // 목록 화면의 후보 수 카운터(0008)
   await ensureFrozenProtocol(env,projectId);
   await enqueueMany(env,projectId,'compute_candidate',candIds.map(id=>({candidate_id:id,phase:'exploration',cycle:0})),40);
   await audit(env,projectId,'agent','cdrs.seed','project',projectId,{created:stmts.length,method:'maximin',estimators:d.estimators||ESTIMATORS,empirical_grid:{sigma:d.sigma,tau:d.tau,d:d.d},source:{sigma:Number.isFinite(observedSigma)&&Number(mm.numeric_observations||0)>=30?'external_observations':'paper/default',tau:Number.isFinite(Number(op.data_latency_days))?'operational_logs':'design',approval_delay:Number.isFinite(Number(op.approval_delay_days))?'operational_logs':'design'}}); return{created:stmts.length};

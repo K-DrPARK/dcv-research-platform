@@ -2,7 +2,7 @@ export const nowIso = () => new Date().toISOString();
 export const uid = (prefix = 'id') => `${prefix}_${crypto.randomUUID()}`;
 export const clamp = (x, lo, hi) => Math.max(lo, Math.min(hi, x));
 export const safeJson = (s, fallback = {}) => { try { return typeof s === 'string' ? JSON.parse(s) : (s ?? fallback); } catch { return fallback; } };
-export const json = (data, status = 200, headers = {}) => new Response(JSON.stringify(data, null, 2), { status, headers: { 'content-type': 'application/json; charset=utf-8', ...headers } });
+export const json = (data, status = 200, headers = {}) => new Response(JSON.stringify(data, null, 2), { status, headers: { 'content-type': 'application/json; charset=utf-8', 'cache-control':'no-store, no-cache, must-revalidate', 'pragma':'no-cache', ...headers } });
 export const mean = xs => xs.length ? xs.reduce((a,b)=>a+b,0)/xs.length : 0;
 export const quantile = (xs, q) => { if (!xs.length) return 0; const a=[...xs].sort((x,y)=>x-y); const p=(a.length-1)*q, lo=Math.floor(p), hi=Math.ceil(p); return lo===hi?a[lo]:a[lo]+(a[hi]-a[lo])*(p-lo); };
 export function hashString(str) { let h=2166136261; for(let i=0;i<str.length;i++){h^=str.charCodeAt(i); h=Math.imul(h,16777619);} return h>>>0; }
@@ -20,4 +20,4 @@ export async function sha256Hex(value){
   return [...new Uint8Array(out)].map(b=>b.toString(16).padStart(2,'0')).join('');
 }
 
-export const APP_VERSION = '0.5.19';
+export const APP_VERSION = '0.5.20';

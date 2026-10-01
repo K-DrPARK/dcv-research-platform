@@ -9,19 +9,21 @@ const fx = (v, d = 2) => Number(v).toFixed(d).replace(/\.?0+$/, '') || '0';
 const pct = v => `${Math.round(v * 100)}%`;
 
 export function figureCatalog(t) {
+  t=t||{};
+  const cand=t.candidates||{}, reviewer=t.reviewer||{}, empirical=t.empirical||{}, vm=t.validation_matrix||{}, sf=t.survival_funnel||{};
   const figs = [
     { n: 10, label: 'M0', file: 'figM0_full_research_blueprint', title: '박사논문 연구모형 전체 설계도: Define–Compute–Validate와 CDRS·인간 검토·실증 보정' },
     { n: 11, label: 'M1', file: 'figM1_research_model', title: '박사논문 연구모형: 데이터–결정 사슬과 위임 가능 영역 D의 정의' },
     { n: 12, label: 'M2', file: 'figM2_dcv_design', title: '연구설계: Define–Compute–Validate–Confirm 단계, 게이트, 논문 3편의 대응 및 현재 프로젝트 진행 상태' },
     { n: 13, label: 'M3', file: 'figM3_region_concept', title: '위임 가능 영역 개념도 (모식도): 이상적 검토자 영역과 실제 검토자 영역' }
   ];
-  if (t.candidates.cells.length) figs.push({ n: 1, file: 'fig1_feasible_region_heatmap', title: 'σ×α 평면의 위임 가능 후보 비율 (셀 내 CONFIRMED / 전체 후보)' });
-  if (t.candidates.estimators.length) figs.push({ n: 2, file: 'fig2_estimator_feasibility', title: '추정기별 위임 가능 비율과 95% Wilson 신뢰구간' });
-  if (t.candidates.finalists.length) figs.push({ n: 3, file: 'fig3_regret_ranking', title: '강건 후보의 Minimax Regret 순위 (낮을수록 우수)' });
-  if (t.reviewer.by_confidence.length) figs.push({ n: 4, file: 'fig4_reviewer_reliance', title: 'AI 신뢰도별 인간 검토자 수용률 (AI 정답/오답 구분, 95% CI)' });
-  if (t.empirical.panel.n) figs.push({ n: 5, file: 'fig5_episode_panel', title: '위기 사례 패널: 최대 유출률 대비 심각도 (파산 여부 구분)' });
-  if (t.validation_matrix?.rows?.length) figs.push({ n: 6, file: 'fig6_external_validation_matrix', title: '후보별 External Validation Matrix (Historical · Synthetic · Adversarial · BIS · ECB · Human)' });
-  if (t.survival_funnel?.stages?.length) figs.push({ n: 7, file: 'fig7_delegation_evidence_funnel', title: 'Delegation Evidence Funnel: 현재 프로젝트 실제 검증결과에 따른 후보 생존 흐름' });
+  if ((cand.cells||[]).length) figs.push({ n: 1, file: 'fig1_feasible_region_heatmap', title: 'σ×α 평면의 위임 가능 후보 비율 (셀 내 CONFIRMED / 전체 후보)' });
+  if ((cand.estimators||[]).length) figs.push({ n: 2, file: 'fig2_estimator_feasibility', title: '추정기별 위임 가능 비율과 95% Wilson 신뢰구간' });
+  if ((cand.finalists||[]).length) figs.push({ n: 3, file: 'fig3_regret_ranking', title: '강건 후보의 Minimax Regret 순위 (낮을수록 우수)' });
+  if ((reviewer.by_confidence||[]).length) figs.push({ n: 4, file: 'fig4_reviewer_reliance', title: 'AI 신뢰도별 인간 검토자 수용률 (AI 정답/오답 구분, 95% CI)' });
+  if (Number(empirical?.panel?.n||0)) figs.push({ n: 5, file: 'fig5_episode_panel', title: '위기 사례 패널: 최대 유출률 대비 심각도 (파산 여부 구분)' });
+  if ((vm.rows||[]).length) figs.push({ n: 6, file: 'fig6_external_validation_matrix', title: '후보별 External Validation Matrix (Historical · Synthetic · Adversarial · BIS · ECB · Human)' });
+  if ((sf.stages||[]).length) figs.push({ n: 7, file: 'fig7_delegation_evidence_funnel', title: 'Delegation Evidence Funnel: 현재 프로젝트 실제 검증결과에 따른 후보 생존 흐름' });
   return figs;
 }
 
@@ -312,6 +314,23 @@ export function figRegionConcept() {
 }
 
 const BUILDERS = { 1: figHeatmap, 2: figEstimators, 3: figRegret, 4: figReviewer, 5: figEpisodes, 6: figExternalValidationMatrix, 7: figDelegationEvidenceFunnel, 10: figFullBlueprint, 11: figResearchModel, 12: figDcvDesign, 13: figRegionConcept };
+function figureErrorSvg(g,error){
+  const W=1120,H=260,msg=`${g.label||g.n} figure temporarily unavailable`;
+  return wrap(W,H,`<rect x="24" y="24" width="${W-48}" height="${H-48}" rx="10" fill="#f8fafc" stroke="#cbd5e1"/><text x="56" y="96" font-size="24" font-weight="700" fill="#17385e">${esc(msg)}</text><text x="56" y="136" font-size="15" fill="#64748b">${esc(g.title||'')}</text><text x="56" y="174" font-size="13" fill="#94a3b8">${esc(String(error?.message||error||'render_error').slice(0,140))}</text>`,msg);
+}
 export function buildFigures(t) {
-  return figureCatalog(t).map(g => { const svg = BUILDERS[g.n](t), m = /viewBox="0 0 (\d+) (\d+)"/.exec(svg); return { ...g, svg, width: +m[1], height: +m[2] }; });
+  const out=[];
+  for(const g of figureCatalog(t)){
+    try{
+      const builder=BUILDERS[g.n];
+      if(!builder) throw new Error(`builder_missing_${g.n}`);
+      const svg=builder(t||{}),m=/viewBox="0 0 (\d+) (\d+)"/.exec(svg||'');
+      if(!m) throw new Error(`invalid_svg_${g.n}`);
+      out.push({...g,svg,width:+m[1],height:+m[2],render_status:'ok'});
+    }catch(error){
+      const svg=figureErrorSvg(g,error),m=/viewBox="0 0 (\d+) (\d+)"/.exec(svg);
+      out.push({...g,svg,width:+m[1],height:+m[2],render_status:'fallback',render_error:String(error?.message||error)});
+    }
+  }
+  return out;
 }

@@ -1,4 +1,4 @@
-# DCV Research Platform v0.5.19
+# DCV Research Platform v0.5.20
 
 > Defense Rigor release: frozen protocol, simultaneous inference, calibration uncertainty propagation, participant-cluster human validation, and human scientific sign-off.
 
@@ -230,3 +230,7 @@ Primary dashboard panels now use exact grid geometry, auxiliary data panels load
 
 ### v0.5.19 refresh/report recovery
 Browser reload now waits until all project loaders are registered; the main analysis deck uses three independent columns, and the report modal defaults to rendered HTML with tables and figures instead of raw Markdown.
+
+
+### v0.5.20 reload / report recovery
+Browser reloads use no-store API reads, dashboard cards synchronize to the rendered right-side reference height on desktop, and report figures are hydrated independently so one rendering error cannot hide the complete figure set.

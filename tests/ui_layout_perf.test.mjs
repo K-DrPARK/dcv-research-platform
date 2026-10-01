@@ -40,6 +40,6 @@ test('browser bootstrap runs after auxiliary project wrappers are registered',()
 test('report preview defaults to rendered HTML and explicitly hydrates figures',()=>{
   const thesis=fs.readFileSync(new URL('../public/thesis.js',import.meta.url),'utf8');
   assert.match(thesis,/window\.DCVReportRender = render/);
-  assert.match(thesis,/view\.innerHTML = mdToHtml\(md\)/);
+  assert.match(thesis,/view\.innerHTML = mdToHtml\(md,\{figure:figureLoadingResolver\}\)/);
   assert.match(app,/window\.DCVReportRender\?\.\(\)/);
 });

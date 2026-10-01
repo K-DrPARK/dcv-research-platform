@@ -663,3 +663,36 @@ body{background:var(--cw-bg)!important;color:var(--cw-ink)!important;overflow-x:
 /* Project/approval cards align at the top, but never stretch the shorter card just to match its neighbour. */
 #projectsSection{align-items:start!important}
 #projectsSection article,#projectsSection>#approvalSection,#projectsSection>#approvalSection>article{height:auto!important}
+
+/* ======================================================================
+   v0.5.20 · Synchronized analytical cards + report figure recovery
+   ====================================================================== */
+@media (min-width:1200px){
+  #computeSection{
+    grid-template-columns:repeat(3,minmax(0,1fr))!important;
+    align-items:start!important;
+  }
+  #computeSection>.col-12:first-child,
+  #computeSection>.col-12:nth-child(2)>.row>.col-12:first-child,
+  #computeSection>.col-12:nth-child(2)>.row>.col-12:last-child{min-width:0!important}
+  #computeSection>.col-12:first-child>article,
+  #validateSection,#recomputeSection{
+    display:flex!important;flex-direction:column!important;overflow:hidden!important;
+  }
+  #computeSection>.col-12:first-child>article .chart-wrap{
+    flex:1 1 auto!important;min-height:0!important;height:auto!important;
+  }
+  #computeSection>.col-12:first-child>article #regionCanvas{
+    flex:1 1 auto!important;min-height:260px!important;height:auto!important;
+  }
+  #validateSection .evidence-grid,#recomputeSection .regret-panel{flex:1 1 auto!important}
+  #projectsSection{grid-template-columns:repeat(2,minmax(0,1fr))!important;align-items:start!important}
+}
+.report-html .figure-loading,.report-html .figure-missing{
+  min-height:180px;display:grid;place-items:center;margin:1rem 0;
+  border:1px dashed #cbd5e1;background:#f8fafc;color:#64748b;
+  font-size:.86rem;padding:18px;text-align:center;
+}
+.report-html figure[data-figure]{overflow:hidden}
+.report-html figure[data-figure] svg{display:block;width:100%;max-width:100%;height:auto;margin:0 auto}
+.report-html figure figcaption{font-size:.72rem;color:#b45309;margin-top:.35rem}

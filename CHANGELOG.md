@@ -1,3 +1,13 @@
+## v0.5.20 — F5 Recovery + Exact Height Sync + Report Figure Recovery
+
+- Added `Cache-Control: no-store` to API JSON responses and browser API/thesis fetches so a browser reload cannot reuse stale project snapshots.
+- Versioned `style.css`, `app.js`, and `thesis.js` asset URLs to avoid stale static bundles after deployment.
+- Auxiliary FDIC / Official / Validation Matrix snapshots are cached only after all three loads succeed; failed F5-time loads are retried automatically.
+- Added ResizeObserver-based desktop height synchronization: the right analytical card is measured after render and the left/middle cards are matched; Projects/Approval are also synchronized.
+- Report preview now renders figure placeholders immediately and hydrates figures individually from the current thesis snapshot.
+- Figure matching is path/query/extension tolerant; one figure renderer failure no longer removes all report figures.
+- Thesis cache invalidates when project cycle/evidence revision changes.
+
 ## v0.5.19 — Refresh Recovery + Three-column Analysis + Report Visual Restore
 
 - Fixed browser F5/reload initialization order: project wrappers and auxiliary loaders are now registered before the first project load.

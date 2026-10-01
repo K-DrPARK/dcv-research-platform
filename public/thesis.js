@@ -11,7 +11,7 @@ const safeName = s => String(s || 'dcv').replace(/[^\w가-힣.-]+/g, '_').slice(
 
 function download(blob, name) { const a = document.createElement('a'), url = URL.createObjectURL(blob); a.href = url; a.download = name; document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(url), 4000); }
 const textBlob = (s, type) => new Blob([s], { type: `${type};charset=utf-8` });
-async function authFetch(path, opts = {}) { const h = { ...(opts.headers || {}) }, t = D.token(); if (t) h.authorization = `Bearer ${t}`; const r = await fetch(path, { ...opts, headers: h }); if (!r.ok) { const j = await r.json().catch(() => ({})); const e = new Error(j.error || r.statusText); e.status = r.status; throw e; } return r; }
+async function authFetch(path, opts = {}) { const h = { 'cache-control':'no-cache', ...(opts.headers || {}) }, t = D.token(); if (t) h.authorization = `Bearer ${t}`; const r = await fetch(path, { cache:'no-store', ...opts, headers: h }); if (!r.ok) { const j = await r.json().catch(() => ({})); const e = new Error(j.error || r.statusText); e.status = r.status; throw e; } return r; }
 const needProject = () => { if (!D.current()) { alert('먼저 프로젝트를 선택하세요.'); return null; } return D.current(); };
 
 export async function svgToPngBlob(svg, w, h, scale = 3) {
@@ -26,7 +26,12 @@ const blobToU8 = async b => new Uint8Array(await b.arrayBuffer());
 // /thesis 는 D1 을 수천 행 읽는 무거운 집계다. 창을 열 때(renderFigCards)만 새로 받고, 이후 Word/MD/HTML/JSON/ZIP/그림 저장은
 // 90초 동안 받아 둔 사본을 재사용한다(이전: 버튼을 누를 때마다 재조회). 오래된 사본은 자동으로 다시 받는다.
 const THESIS_TTL_MS = 90_000;
-const cache = { id: null, thesis: null, figs: null, at: 0 };
+const cache = { id: null, thesis: null, figs: null, at: 0, signature:null };
+window.addEventListener('dcv:project-loaded',ev=>{
+  const d=ev.detail||{},sig=`${d.id||''}|${Number(d.cycle||1)}|${Number(d.revision||0)}`;
+  if(cache.signature&&cache.signature!==sig)Object.assign(cache,{id:null,thesis:null,figs:null,at:0});
+  cache.signature=sig;
+});
 async function loadThesis(force = false) {
   const id = needProject(); if (!id) throw new Error('no_project');
   if (!force && cache.id === id && cache.thesis && Date.now() - cache.at < THESIS_TTL_MS) return cache;
@@ -35,9 +40,23 @@ async function loadThesis(force = false) {
 }
 async function loadReportMd() { try { const r = await (await authFetch(`/api/projects/${D.current()}/report`)).json(); return r.content_markdown || null; } catch (e) { if (e.status === 404) return null; throw e; } }
 
-function figureResolver(figs) {
-  return (alt, src) => { const file = (src.split('/').pop() || '').replace(/\.\w+$/, ''), f = figs.find(x => x.file === file); return f ? `<figure>${f.svg}</figure>` : ''; };
+function figureKey(src=''){
+  try{src=decodeURIComponent(String(src));}catch{}
+  return (src.split(/[?#]/)[0].split('/').pop()||'').replace(/\.(?:png|svg|jpg|jpeg|webp)$/i,'');
 }
+function figureResolver(figs=[]) {
+  return (alt, src) => {
+    const key=figureKey(src);
+    let f=figs.find(x=>x.file===key);
+    if(!f){
+      const n=/fig(?:ure)?[_-]?(?:M)?(\d+)/i.exec(key)?.[1]||/그림\s*(\d+)/.exec(String(alt||''))?.[1];
+      if(n)f=figs.find(x=>String(x.n)===String(Number(n)));
+    }
+    if(!f)return `<figure class="figure-missing" data-figure="${esc(key)}"><div>그림을 불러오지 못했습니다 · ${esc(alt||key)}</div></figure>`;
+    return `<figure data-figure="${esc(f.file)}">${f.svg}${f.render_status==='fallback'?`<figcaption>Figure renderer fallback · ${esc(f.render_error||'')}</figcaption>`:''}</figure>`;
+  };
+}
+const figureLoadingResolver=(alt,src)=>`<figure class="figure-loading" data-figure="${esc(figureKey(src))}"><div>그림 불러오는 중… · ${esc(alt||'')}</div></figure>`;
 
 /* ---------- 빠른 그림 저장 (위임 가능 영역 패널) ---------- */
 async function quickFigure(kind) {
@@ -137,10 +156,16 @@ function inject() {
     if (!md) { view.innerHTML = ''; return; }
     if (raw) { pre.style.display = ''; view.style.display = 'none'; return; }
     pre.style.display = 'none'; view.style.display = '';
-    view.innerHTML = mdToHtml(md);
+    view.innerHTML = mdToHtml(md,{figure:figureLoadingResolver});
     if (!D.current()) return;
-    try { const { figs } = await loadThesis(); view.innerHTML = mdToHtml(md, { figure: figureResolver(figs) }); }
-    catch (e) { /* keep the already-rendered tables/text when figure hydration fails */ }
+    try {
+      let payload;
+      try{payload=await loadThesis();}catch{payload=await loadThesis(true);}
+      view.innerHTML = mdToHtml(md, { figure: figureResolver(payload.figs||[]) });
+    }
+    catch (e) {
+      view.querySelectorAll('.figure-loading').forEach(el=>{el.className='figure-missing';el.innerHTML=`<div>그림 데이터 로드 실패 · ${esc(e.message||e)}</div>`;});
+    }
   };
   window.DCVReportRender = render;
   $('#reportToggle').onclick = () => { raw = !raw; $('#reportToggle').textContent = raw ? '보기 좋게' : '원문 보기'; render(); };

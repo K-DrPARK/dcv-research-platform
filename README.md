@@ -1,6 +1,13 @@
-# DCV Research Platform v0.5.14
+# DCV Research Platform v0.5.15
 
 > Defense Rigor release: frozen protocol, simultaneous inference, calibration uncertainty propagation, participant-cluster human validation, and human scientific sign-off.
+
+## v0.5.15 Light Research Console UI
+
+- `cbdc-research-client.pages.dev`의 밝은 연구도구 UI 계열을 참고해 전체 화면을 white/light-blue 연구 콘솔로 재설계했습니다.
+- 장식형 dark hero를 compact research header로 축소하고 카드/입력/테이블/모달/Workbench를 일관된 white surface로 통일했습니다.
+- compute/project/detail 영역의 강제 높이와 stretch를 제거해 과도한 공백을 줄였습니다.
+- External Data 영역은 desktop에서 1.65fr + 0.67fr + 0.67fr compact grid로 배치해 긴 왼쪽 패널과 빈 오른쪽 패널 문제를 완화했습니다.
 
 ## v0.5.14 Figure 7 layout fix
 - Figure 7의 Human 단계와 최종 strict survivor/주석 영역을 분리해 글자 겹침을 제거했습니다.

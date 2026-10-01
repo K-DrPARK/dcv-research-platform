@@ -1,3 +1,11 @@
+## v0.5.15 — Light Research Console UI
+
+- Reference style: `cbdc-research-client.pages.dev`의 연구 콘솔 UI를 바탕으로 밝은 white/light-blue surface, compact form/card, restrained blue accent로 전면 개편.
+- dark glassmorphism/과도한 배경 장식을 제거하고 입력·테이블·모달·Workbench까지 light theme으로 통일.
+- compute/projects/detail panel의 `h-100` stretch와 고정 min-height를 무력화해 빈 공간을 크게 축소.
+- hero를 compact research header로 축소하고 workflow/stats/chart/panels 간 vertical rhythm을 촘촘하게 재조정.
+- 상세영역 desktop grid를 데이터 1.65fr / 인간검토 0.67fr / 작업 0.67fr로 재배치.
+
 # Changelog
 
 ## v0.5.14 — Figure 7 layout fix

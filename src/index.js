@@ -1,6 +1,7 @@
 import { json, nowIso, uid, safeJson } from './lib/util.js';
 import { requireAdmin } from './lib/auth.js';
-import { all, one, run, enqueue, audit } from './lib/db.js';
+import { all, one, run, enqueue, enqueueOnce, audit } from './lib/db.js';
+import { bust } from './lib/memo.js';
 import { processJobs, scheduleAll, advanceProject } from './lib/orchestrator.js';
 import { generateReport, upgradeStoredReport } from './lib/report.js';
 import { buildThesisData, exportCsv, EXPORT_NAMES } from './lib/thesis.js';
@@ -52,7 +53,7 @@ async function api(request,env){
       const protocol=await latestProtocol(env,projectId);
       return json({project:p,definition:def?{...def,gate:safeJson(def.gate_json,{}),content:safeJson(def.content_json,{}),ai:safeJson(def.ai_note,{})}:null,measurement:meas?{...meas,metrics:safeJson(meas.metrics_json,{}),quality:safeJson(meas.quality_json,{})}:null,candidates:counts,approval:app?{...app,basis:safeJson(app.basis_json,{})}:null,reviewer:reviewer?{...reviewer,model:safeJson(reviewer.model_json,{})}:null,jobs,runs,scenarios,human_reviews:Number(human?.n||0),empirical,protocol});
     }
-    if(parts[3]==='run' && method==='POST'){ const r=await advanceProject(env,projectId); return json({advance:r,transport:env.CDRS_QUEUE?'cloudflare-queue':'d1-fallback'}); }
+    if(parts[3]==='run' && method==='POST'){ await run(env.DB,`UPDATE projects SET reviewer_hold_marker=NULL WHERE id=?`,[projectId]); const r=await advanceProject(env,projectId); return json({advance:r,transport:env.CDRS_QUEUE?'cloudflare-queue':'d1-fallback'}); }
     if(parts[3]==='sources' && method==='GET'){ return json({sources:await all(env.DB,`SELECT * FROM data_sources WHERE project_id=? ORDER BY created_at DESC`,[projectId])}); }
     if(parts[3]==='sources' && method==='POST'){
       const b=await bodyJson(request), id=uid('source');
@@ -67,13 +68,13 @@ async function api(request,env){
     if(parts[3]==='reviewer-observations' && method==='POST'){
       const b=await bodyJson(request); const id=uid('review');
       await run(env.DB,`INSERT INTO reviewer_observations(id,project_id,participant_hash,ai_confidence,ai_correct,human_accept,response_ms,recovered,recovery_ms,context_json,created_at) VALUES(?,?,?,?,?,?,?,?,?,?,?)`,[id,projectId,String(b.participant_hash||'anon'),Number(b.ai_confidence),b.ai_correct?1:0,b.human_accept?1:0,Number(b.response_ms||0),b.recovered?1:0,b.recovery_ms==null?null:Number(b.recovery_ms),JSON.stringify(b.context||{}),nowIso()]);
-      await enqueue(env,projectId,'advance_project',{},99); return json({id},201);
+      await enqueueOnce(env,projectId,'advance_project',{},99,30); return json({id},201);   // 관측 N건 → advance 1건으로 병합
     }
     if(parts[3]==='scenarios' && method==='GET'){ return json({scenarios:await all(env.DB,`SELECT * FROM scenarios WHERE project_id=? ORDER BY scenario_type,name`,[projectId])}); }
     if(parts[3]==='scenarios' && method==='POST'){
       const b=await bodyJson(request), rows=Array.isArray(b)?b:(b.rows||[b]), stmts=[];
       for(const r of rows.slice(0,500)) stmts.push(env.DB.prepare(`INSERT INTO scenarios(id,project_id,name,scenario_type,severity,volatility,delay_multiplier,loss_multiplier,metadata_json,created_at) VALUES(?,?,?,?,?,?,?,?,?,?)`).bind(uid('scenario'),projectId,r.name||'scenario',r.scenario_type||'historical',Number(r.severity||1),Number(r.volatility||1),Number(r.delay_multiplier||1),Number(r.loss_multiplier||1),JSON.stringify(r.metadata||{}),nowIso()));
-      if(stmts.length) await env.DB.batch(stmts); return json({inserted:stmts.length},201);
+      if(stmts.length) await env.DB.batch(stmts); bust(env,projectId); return json({inserted:stmts.length},201);
     }
     if(parts[3]==='empirical' && parts.length===4 && method==='GET'){
       const readiness=await empiricalReadiness(env,projectId),cal=await loadEmpiricalCalibration(env,projectId);

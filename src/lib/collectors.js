@@ -2,6 +2,7 @@ import { all, run, audit } from './db.js';
 import { nowIso, uid, safeJson } from './util.js';
 import { importEmpiricalEpisodes } from './empirical.js';
 import { collectFdicSource } from './fdic.js';
+import { collectOfficialSource } from './official_sources.js';
 
 function getPath(obj, path){ if(!path) return obj; return String(path).split('.').reduce((a,k)=>a?.[k], obj); }
 function parseCsv(text){
@@ -25,6 +26,9 @@ export async function collectProject(env, projectId){
   let inserted=0, empiricalRows=0, errors=[];
   for(const s of sources){
     try{
+      if(s.kind==='official_connector'){
+        const or=await collectOfficialSource(env,projectId,s); inserted+=Number(or.inserted||0); continue;
+      }
       if(s.kind==='fdic_sod' || s.kind==='fdic_financials'){
         const fr=await collectFdicSource(env,projectId,s);
         inserted+=Number(fr.inserted||0);

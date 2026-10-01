@@ -207,3 +207,9 @@
 - 마지막 선택 프로젝트를 localStorage에 기억하여 새 배포/새로고침 후에도 같은 프로젝트를 복원.
 - GitHub Actions에 `DCV_EXPECTED_D1_DATABASE_ID` 검증, migration 전후 프로젝트 수 감소 차단 guard 추가.
 - critical migration safety test: `projects` table DROP/DELETE 금지.
+
+## 0.5.8
+- Added Case A official connector layer: BIS CPMI cashless payments, ECB Supervisory Banking Statistics (LCR/CET1), Bank of Korea ECOS.
+- Added Case B layer for Open Fiscal Data and e나라도움 with configurable endpoint/row/value/time mappings and secret-based authentication.
+- Added normalized `official_observations`, sync audit trail, Case A/B layer status, CSV exports and thesis report section 3.7.
+- Preserved incremental DCV revalidation: only changed observations count as new evidence.

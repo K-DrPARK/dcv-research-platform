@@ -63,3 +63,12 @@ All estimators are evaluated inside the same stochastic environment and constrai
 ## Episode Reverification Workbench (v0.5.6)
 
 `fdic_reverification_rankings`의 CRITICAL/HIGH episode는 `/api/projects/:id/fdic/workbench/:episodeId`로 drill-down 된다. Workbench는 thesis-panel 값, CERT linkage, FDIC Financials, SOD, state-market HHI를 함께 제시하되 어떤 FDIC 파생값도 panel 값을 자동 덮어쓰지 않는다. 검토결론은 `fdic_reverification_reviews`에 versioned audit evidence로 저장하며, `RESOLVED` 전환은 모든 checklist item과 reviewer note를 요구한다. 최초 RESOLVED는 `REVERIFICATION_REVIEW` evidence revision을 생성하여 기존 approval/report를 stale 처리하고 VALIDATE부터 재검증한다.
+
+## v0.5.8 — Official Case Layers
+
+The platform separates official external data into two evidence layers:
+
+- **Case A**: BIS CPMI, ECB Supervisory Banking Statistics, and Bank of Korea ECOS for CBDC/payment-system external validation.
+- **Case B**: 열린재정 and e나라도움/보조금통합포털 for the fiscal/subsidy-payment replication case.
+
+All connectors normalize observations into `official_observations` while retaining raw payload/dimensions and connector provenance. Changed observations trigger the incremental evidence workflow from MEASURE; unchanged refreshes are idempotent. Case-B public APIs are contextual/execution covariates and are not treated as fraud/payment-stop ground-truth labels.

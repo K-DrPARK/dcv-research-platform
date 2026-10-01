@@ -172,3 +172,9 @@ Use **External Data → FDIC Episode Connector → 재검증 우선순위** or c
 
 ### 기존 연구프로젝트가 보이지 않을 때 (v0.5.7+)
 프로젝트가 빈 목록으로 보이더라도 데이터 삭제로 단정하지 마십시오. 플랫폼은 D1 저장소 lineage를 브라우저에 기억하고, binding 변경 또는 schema migration 누락을 감지해 상단 경고를 표시합니다. 먼저 `wrangler.jsonc`의 `database_id`가 기존 운영 D1과 같은지 확인하고 `npm run db:migrate:remote`를 실행하십시오. CI에서는 `DCV_EXPECTED_D1_DATABASE_ID` secret을 등록하면 다른 D1으로의 실수 배포가 차단됩니다. migration은 프로젝트 수를 줄이면 배포 전에 실패합니다.
+
+## v0.5.8 official data layers
+- Case A: BIS CPMI Red Book (SDMX) → ECB SUP (SDMX) → Bank of Korea ECOS (API key).
+- Case B: Open Fiscal Data + e나라도움/보조금통합포털. Case B is isolated from Case A and requires dataset-specific endpoint/mapping configuration plus Cloudflare secrets.
+- Secrets: `ECOS_API_KEY`, `OPENFISCAL_API_KEY`, `BOJO_API_KEY`.
+- New/changed official observations create external evidence; unchanged scheduled refreshes do not create a new research cycle.

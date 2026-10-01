@@ -12,6 +12,7 @@ import { latestProtocol } from './lib/rigor.js';
 import { registerEvidence, approvalGates } from './lib/evidence.js';
 import { SOURCE_PRESETS } from './lib/source_presets.js';
 import { resolveFdicLinks, confirmFdicLink, fdicStatus, enableFdicConnectors, buildFdicReverificationRankings, getFdicReverificationRankings, getFdicReverificationWorkbench, saveFdicReverificationReview, attachFdicReviewEvidenceRevision } from './lib/fdic.js';
+import { OFFICIAL_CONNECTORS, enableOfficialConnector, officialSourceStatus } from './lib/official_sources.js';
 
 async function bodyJson(request){ try{return await request.json();}catch{return {};} }
 function pathParts(url){ return new URL(url).pathname.split('/').filter(Boolean); }
@@ -51,7 +52,7 @@ async function api(request,env){
   if(url.pathname==='/api/health') return json({ok:true,app:env.APP_NAME||'DCV Research Platform',time:nowIso()});
   const auth=requireAdmin(request,env); if(auth) return auth;
 
-  if(url.pathname==='/api/source-presets' && method==='GET') return json({presets:SOURCE_PRESETS});
+  if(url.pathname==='/api/source-presets' && method==='GET') return json({presets:SOURCE_PRESETS,official_connectors:Object.values(OFFICIAL_CONNECTORS)});
   if(url.pathname==='/api/system/integrity' && method==='GET') return json(await storageIntegrity(env));
 
   if(url.pathname==='/api/projects' && method==='GET'){
@@ -93,6 +94,9 @@ async function api(request,env){
     }
     if(parts[3]==='run' && method==='POST'){ await run(env.DB,`UPDATE projects SET reviewer_hold_marker=NULL WHERE id=?`,[projectId]); const r=await advanceProject(env,projectId); return json({advance:r,transport:env.CDRS_QUEUE?'cloudflare-queue':'d1-fallback'}); }
     if(parts[3]==='sources' && method==='GET'){ return json({sources:await all(env.DB,`SELECT * FROM data_sources WHERE project_id=? ORDER BY created_at DESC`,[projectId])}); }
+    if(parts[3]==='official-sources' && parts[4]==='status' && method==='GET'){ return json(await officialSourceStatus(env,projectId)); }
+    if(parts[3]==='official-sources' && parts[4]==='enable' && method==='POST'){ const b=await bodyJson(request); const ids=Array.isArray(b.connector_ids)?b.connector_ids:[b.connector_id].filter(Boolean); const out=[]; for(const id of ids) out.push({connector_id:id,...await enableOfficialConnector(env,projectId,id,(b.configs||{})[id]||b.config||{})}); return json({enabled:out,status:await officialSourceStatus(env,projectId)},201); }
+    if(parts[3]==='official-sources' && parts[4]==='collect' && method==='POST'){ await enqueueOnce(env,projectId,'collect_project',{refresh:true,official_manual:true},20,1); return json({status:'queued'}); }
     if(parts[3]==='fdic' && parts[4]==='status' && method==='GET'){ return json(await fdicStatus(env,projectId)); }
     if(parts[3]==='fdic' && parts[4]==='enable' && method==='POST'){ const enabled=await enableFdicConnectors(env,projectId); const links=await resolveFdicLinks(env,projectId,{autoConfirm:true,maxEpisodes:81}); await enqueueOnce(env,projectId,'collect_project',{refresh:true,fdic_manual:true},20,1); return json({status:'enabled',...enabled,links}); }
     if(parts[3]==='fdic' && parts[4]==='resolve' && method==='POST'){ const b=await bodyJson(request); return json(await resolveFdicLinks(env,projectId,{autoConfirm:b.auto_confirm!==false,maxEpisodes:Number(b.max_episodes||81)})); }
@@ -104,7 +108,7 @@ async function api(request,env){
     if(parts[3]==='fdic' && parts[4]==='workbench' && parts[5] && method==='POST'){ const b=await bodyJson(request); try{const saved=await saveFdicReverificationReview(env,projectId,parts[5],b); let ev=null; if(saved.needs_evidence_registration){ ev=await registerEvidence(env,projectId,{kind:'REVERIFICATION_REVIEW',impact_from:'validate',source:'fdic_workbench',detail:{episode_id:parts[5],review_status:saved.review_status,recommended_action:saved.recommended_action,cause_code:b.cause_code||''}}); await attachFdicReviewEvidenceRevision(env,projectId,parts[5],ev.evidence_revision); } return json({...saved,revalidation:ev});}catch(e){return json({error:String(e.message||e)},400);} }
     if(parts[3]==='sources' && method==='POST'){
       const b=await bodyJson(request), id=uid('source');
-      await run(env.DB,`INSERT INTO data_sources(id,project_id,name,kind,url,method,headers_json,mapping_json,enabled,cadence_minutes,created_at) VALUES(?,?,?,?,?,?,?,?,1,?,?)`,[id,projectId,b.name||'External Source',b.kind||'json',b.url,b.method||'GET',JSON.stringify(b.headers||{}),JSON.stringify(b.mapping||{}),Number(b.cadence_minutes||60),nowIso()]);
+      await run(env.DB,`INSERT INTO data_sources(id,project_id,name,kind,url,method,headers_json,mapping_json,enabled,cadence_minutes,created_at,connector_id,case_layer,data_role,config_json,last_record_count) VALUES(?,?,?,?,?,?,?,?,1,?,?,?,?,?,?,0)`,[id,projectId,b.name||'External Source',b.kind||'json',b.url,b.method||'GET',JSON.stringify(b.headers||{}),JSON.stringify(b.mapping||{}),Number(b.cadence_minutes||60),nowIso(),b.connector_id||null,b.case_layer||'A',b.data_role||null,JSON.stringify(b.config||{})]);
       await audit(env,projectId,'user','source.created','data_source',id,b); return json({id},201);
     }
     if(parts[3]==='observations' && method==='POST'){

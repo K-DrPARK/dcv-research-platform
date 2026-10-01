@@ -189,8 +189,14 @@ D1 reads were also profiled and reduced: official observation ingestion now perf
 Each candidate is tracked across six independent evidence layers: `Synthetic`, `Historical`, `Adversarial`, `BIS`, `ECB`, and `Human`. The dashboard shows PASS/HOLD/FAIL/N/A for every candidate; the same evidence is exported as `validation_matrix.csv` and rendered automatically as thesis Figure 6. BIS/ECB are evaluated as separate official-data stress subsets and missing evidence remains N/A rather than being treated as failure.
 
 
-### v0.5.11: Delegation Evidence Funnel (Figure 7)
+### v0.5.12: Delegation Evidence Funnel (Figure 7)
 - External Validation Matrix를 순차 검증 게이트로 재구성한 strict cumulative PASS 퍼널을 추가했습니다.
 - Candidate pool → Synthetic → Historical → Adversarial → BIS → ECB → Human 순으로 누적 생존 후보를 계산합니다.
 - HOLD 및 candidate-level N/A는 strict survivor로 계산하지 않으며, 특정 검증층 전체가 N/A이면 해당 층을 미검증으로 표시하고 직전 생존수를 이월합니다.
 - 논문 보고서 Figure 7 및 표 9C, 대시보드의 compact funnel을 동일 데이터에서 자동 생성합니다.
+
+
+### v0.5.12: Figure 7 current-project provenance labels
+- Figure 7과 대시보드 funnel은 현재 프로젝트의 Project / Research Cycle / Evidence Revision / 생성시각을 명시합니다.
+- 보고서의 표 9C와 Figure 7은 `candidate_validation_matrix` 현재 snapshot의 실제 계산값만 사용하며 설명용 예시 survivor count를 삽입하지 않습니다.
+- 전체 validation layer가 N/A이면 이전 count를 이월하되 N/A로 명시하는 기존 원칙은 유지합니다.

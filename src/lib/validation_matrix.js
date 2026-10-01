@@ -44,11 +44,11 @@ export async function refreshValidationMatrix(env,projectId){
   return {rows:cands.length,pass,fail,hold,partial,cycle,revision:rev};
 }
 export async function getValidationMatrix(env,projectId){
-  const p=await one(env.DB,`SELECT research_cycle,evidence_revision FROM projects WHERE id=?`,[projectId]);if(!p)throw new Error('project_not_found');
+  const p=await one(env.DB,`SELECT name,research_cycle,evidence_revision FROM projects WHERE id=?`,[projectId]);if(!p)throw new Error('project_not_found');
   const cycle=Number(p.research_cycle||1),rev=Number(p.evidence_revision||0);
   const rows=await all(env.DB,`SELECT m.*,c.estimator,c.sigma,c.alpha,c.authority_k,c.delay_d,c.max_regret,c.status candidate_status FROM candidate_validation_matrix m JOIN design_candidates c ON c.id=m.candidate_id WHERE m.project_id=? AND m.research_cycle=? AND m.evidence_revision=? ORDER BY CASE m.overall_status WHEN 'PASS' THEN 1 WHEN 'PARTIAL' THEN 2 WHEN 'HOLD' THEN 3 WHEN 'FAIL' THEN 4 ELSE 5 END, COALESCE(c.max_regret,999999),c.authority_k DESC,c.sigma`,[projectId,cycle,rev]);
   const summary={total:rows.length,PASS:0,PARTIAL:0,HOLD:0,FAIL:0,NA:0,dimensions:{}};
   for(const k of DIMS)summary.dimensions[k]={PASS:0,HOLD:0,FAIL:0,NA:0};
   for(const r of rows){summary[r.overall_status]=(summary[r.overall_status]||0)+1;for(const k of DIMS){const s=r[k.toLowerCase()+'_status']||'NA';summary.dimensions[k][s]=(summary.dimensions[k][s]||0)+1;}}
-  return {cycle,revision:rev,dimensions:DIMS,summary,rows:rows.map(r=>({...r,detail:safeJson(r.detail_json,{})}))};
+  return {project_id:projectId,project_name:p.name||projectId,cycle,revision:rev,generated_at:nowIso(),basis:'CURRENT_PROJECT_ONLY',dimensions:DIMS,summary,rows:rows.map(r=>({...r,detail:safeJson(r.detail_json,{})}))};
 }

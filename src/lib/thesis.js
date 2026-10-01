@@ -224,7 +224,13 @@ export async function buildThesisData(env, projectId) {
     final_survivors:strictPool.length,
     final_rate:cands.length?strictPool.length/cands.length:0,
     method:'STRICT_CUMULATIVE_PASS_v1',
-    note:'Strict cumulative funnel: a candidate advances only after PASS at every available preceding gate. HOLD and candidate-level N/A are pending, not survivors. If an entire validation layer is unavailable, the preceding count is carried forward and that layer is labelled N/A.'
+    basis:'CURRENT_PROJECT_ONLY',
+    project_id:projectId,
+    project_name:project.name,
+    research_cycle:cycle,
+    evidence_revision:rev,
+    generated_at:nowIso(),
+    note:'Current-project result only. Every displayed count is calculated from this project current candidate_validation_matrix for the active research_cycle/evidence_revision; no illustrative or example survivor counts are inserted. Strict cumulative funnel: a candidate advances only after PASS at every available preceding gate. HOLD and candidate-level N/A are pending, not survivors. If an entire validation layer is unavailable, the preceding count is carried forward and that layer is labelled N/A.'
   };
 
   const phaseAgg = new Map();

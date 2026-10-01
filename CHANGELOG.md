@@ -237,3 +237,10 @@
 - Added report §5.2 and Table 9C.
 - Added compact dashboard funnel below External Validation Matrix.
 - Whole-layer N/A is carried forward and explicitly labeled; HOLD/candidate-level N/A do not count as confirmed survival.
+
+
+## v0.5.12 — Figure 7 Current-Project Provenance
+- Figure 7에 프로젝트명, Research Cycle, Evidence Revision, 생성시각을 표시.
+- Dashboard funnel에 ‘현재 프로젝트 실제 결과 / 예시값 없음’ 메타 라벨 추가.
+- Report 5.2/표 9C에 현재 snapshot의 실제 계산값만 사용함을 명시.
+- Validation Matrix API가 project_name/generated_at/basis=CURRENT_PROJECT_ONLY를 반환.

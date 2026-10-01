@@ -21,7 +21,7 @@ export function figureCatalog(t) {
   if (t.reviewer.by_confidence.length) figs.push({ n: 4, file: 'fig4_reviewer_reliance', title: 'AI 신뢰도별 인간 검토자 수용률 (AI 정답/오답 구분, 95% CI)' });
   if (t.empirical.panel.n) figs.push({ n: 5, file: 'fig5_episode_panel', title: '위기 사례 패널: 최대 유출률 대비 심각도 (파산 여부 구분)' });
   if (t.validation_matrix?.rows?.length) figs.push({ n: 6, file: 'fig6_external_validation_matrix', title: '후보별 External Validation Matrix (Historical · Synthetic · Adversarial · BIS · ECB · Human)' });
-  if (t.survival_funnel?.stages?.length) figs.push({ n: 7, file: 'fig7_delegation_evidence_funnel', title: 'Delegation Evidence Funnel: 검증층을 통과하며 축소되는 후보 집합' });
+  if (t.survival_funnel?.stages?.length) figs.push({ n: 7, file: 'fig7_delegation_evidence_funnel', title: 'Delegation Evidence Funnel: 현재 프로젝트 실제 검증결과에 따른 후보 생존 흐름' });
   return figs;
 }
 
@@ -100,10 +100,13 @@ export function figExternalValidationMatrix(t) {
 export function figDelegationEvidenceFunnel(t) {
   const f=t.survival_funnel||{stages:[]},stages=(f.stages||[]);
   if(stages.length<2)return wrap(760,220,text(380,110,'Delegation evidence funnel unavailable',{anchor:'middle',size:16,weight:700}),'Delegation evidence funnel');
-  const W=980,H=650,cx=W/2,top=94,stepH=68,gap=10,maxW=760,minW=165,initial=Math.max(1,Number(f.initial_candidates||stages[0]?.survivors||1));
+  const W=980,H=675,cx=W/2,top=108,stepH=68,gap=10,maxW=760,minW=165,initial=Math.max(1,Number(f.initial_candidates||stages[0]?.survivors||1));
   const widthFor=n=>Math.max(minW,maxW*Math.sqrt(Math.max(0,Number(n))/initial));
   const cols=['#0072B2','#56B4E9','#009E73','#E69F00','#6a3d9a','#D55E00','#555'];
-  let body=text(cx,30,'Delegation Evidence Funnel',{anchor:'middle',size:19,weight:700})+text(cx,53,'Synthetic → Historical → Adversarial → BIS → ECB → Human',{anchor:'middle',size:12,fill:C.mute});
+  const projectName=f.project_name||t.project?.name||'Current project',cycle=f.research_cycle??t.project?.research_cycle??'-',rev=f.evidence_revision??t.project?.evidence_revision??'-';
+  let body=text(cx,25,'Delegation Evidence Funnel · Current Project Result',{anchor:'middle',size:18,weight:700})
+    +text(cx,47,`${projectName} · Cycle ${cycle} · Evidence r${rev}`,{anchor:'middle',size:11.5,weight:700,fill:C.blue})
+    +text(cx,66,'Synthetic → Historical → Adversarial → BIS → ECB → Human · actual current-project counts only',{anchor:'middle',size:10.8,fill:C.mute});
   stages.forEach((st,i)=>{
     const y=top+i*(stepH+gap),w=widthFor(st.survivors),next=stages[i+1],w2=next?widthFor(next.survivors):w,x=cx-w/2,yn=y+stepH;
     const fill=st.unavailable?'#ececec':cols[Math.min(i,cols.length-1)];
@@ -113,8 +116,9 @@ export function figDelegationEvidenceFunnel(t) {
     body+=text(cx,y+27,label,{anchor:'middle',size:14,weight:700,fill:st.unavailable?C.ink:'#fff'})+text(cx,y+49,`${st.survivors} survivors · ${pct(rate)}`,{anchor:'middle',size:12,weight:700,fill:st.unavailable?C.mute:'#fff'});
     if(i>0){const right=x+w+14;body+=text(right,y+24,st.unavailable?'N/A · gate unavailable':`eliminated ${st.eliminated||0}`,{size:11.5,fill:st.unavailable?C.mute:C.bad,weight:700});body+=text(right,y+43,st.unavailable?`carried forward ${st.survivors}`:`pending ${st.pending||0}`,{size:11,fill:C.mute});}
   });
-  body+=text(cx,H-43,`Final strict survivors: ${f.final_survivors??0} / ${f.initial_candidates??0} (${pct(Number(f.final_rate||0))})`,{anchor:'middle',size:14,weight:700});
-  body+=text(cx,H-20,'Strict cumulative PASS: HOLD 및 candidate-level N/A는 생존으로 계산하지 않으며, 전체 layer가 N/A인 경우에만 직전 수를 이월한다.',{anchor:'middle',size:10.5,fill:C.mute});
+  body+=text(cx,H-55,`Final strict survivors: ${f.final_survivors??0} / ${f.initial_candidates??0} (${pct(Number(f.final_rate||0))})`,{anchor:'middle',size:14,weight:700});
+  body+=text(cx,H-34,'Strict cumulative PASS: HOLD 및 candidate-level N/A는 생존으로 계산하지 않으며, 전체 layer가 N/A인 경우에만 직전 수를 이월한다.',{anchor:'middle',size:10.5,fill:C.mute});
+  body+=text(cx,H-15,`Source snapshot: current project · Cycle ${cycle} · Evidence r${rev} · ${f.generated_at||t.generated_at||'-'}`,{anchor:'middle',size:9.7,fill:C.mute});
   return wrap(W,H,body,'검증층을 통과하며 축소되는 위임 후보 생존 퍼널');
 }
 

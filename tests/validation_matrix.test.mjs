@@ -18,6 +18,7 @@ test('External Validation Matrix separates Synthetic/Historical/Adversarial/BIS/
   DB.raw.prepare(`INSERT INTO validations(id,project_id,candidate_id,validation_type,status,result_json,created_at,evidence_revision) VALUES('hv',?,?,'human_recompute','CONFIRM','{}',?,0)`).run(pid,cid,ts);
   const r=await refreshValidationMatrix({DB},pid);assert.equal(r.rows,1);
   const vm=await getValidationMatrix({DB},pid),x=vm.rows[0];
+  assert.equal(vm.basis,'CURRENT_PROJECT_ONLY');assert.equal(vm.project_id,pid);assert.ok(vm.project_name);assert.ok(vm.generated_at);
   assert.equal(x.synthetic_status,'PASS');assert.equal(x.historical_status,'PASS');assert.equal(x.adversarial_status,'PASS');assert.equal(x.bis_status,'FAIL');assert.equal(x.ecb_status,'HOLD');assert.equal(x.human_status,'PASS');assert.equal(x.overall_status,'FAIL');
   assert.equal(vm.summary.dimensions.BIS.FAIL,1);assert.equal(vm.summary.dimensions.ECB.HOLD,1);
 });
@@ -35,8 +36,9 @@ test('Figure 7 survival funnel uses strict cumulative PASS and exposes N/A layer
   const {buildFigures}=await import('../public/figures.js');
   const t={
     candidates:{cells:[],estimators:[],finalists:[]},reviewer:{by_confidence:[]},empirical:{panel:{n:0,episodes:[]}},
+    project:{name:'Current Thesis Project',research_cycle:3,evidence_revision:7},generated_at:'2026-10-01T16:30:00.000Z',
     validation_matrix:{rows:[{candidate_id:'a'}]},
-    survival_funnel:{initial_candidates:4,final_survivors:1,final_rate:.25,stages:[
+    survival_funnel:{basis:'CURRENT_PROJECT_ONLY',project_name:'Current Thesis Project',research_cycle:3,evidence_revision:7,generated_at:'2026-10-01T16:30:00.000Z',initial_candidates:4,final_survivors:1,final_rate:.25,stages:[
       {key:'baseline',stage:'Candidate pool',total:4,survivors:4,eliminated:0,pending:0,unavailable:false,survival_rate:1},
       {key:'synthetic',stage:'Synthetic',total:4,survivors:3,eliminated:1,pending:0,unavailable:false,survival_rate:.75},
       {key:'historical',stage:'Historical',total:3,survivors:2,eliminated:1,pending:0,unavailable:false,survival_rate:.5},
@@ -50,6 +52,8 @@ test('Figure 7 survival funnel uses strict cumulative PASS and exposes N/A layer
   assert.ok(f);
   assert.match(f.svg,/Delegation Evidence Funnel/);
   assert.match(f.svg,/Final strict survivors: 1 \/ 4/);
+  assert.match(f.svg,/Current Thesis Project · Cycle 3 · Evidence r7/);
+  assert.match(f.svg,/actual current-project counts only/);
   assert.match(f.svg,/N\/A · gate unavailable/);
   assert.ok(!/undefined|NaN/.test(f.svg));
 });

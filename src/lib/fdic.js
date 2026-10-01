@@ -85,7 +85,7 @@ export async function resolveFdicLinks(env,projectId,{autoConfirm=true,maxEpisod
   if(!eps.length)return {episodes:0,confirmed:0,pending:0,candidates:0};
   const failureResp=await fdicFetch(env,'failures',{limit:10000},{maxPages:2});
   const failures=failureResp.rows.map(unwrap);
-  let confirmed=0,pending=0,candidates=0;
+  let confirmed=0,pending=0,candidates=0; const linkWrites=[];
   for(const e of eps){
     const scored=failures.map(r=>({r,score:bankNameScore(e.episode_name,pick(r,['NAME','NAMEFULL','name'])||'')})).filter(x=>x.score>=0.48).sort((a,b)=>b.score-a.score).slice(0,5);
     if(!scored.length)continue;
@@ -95,10 +95,11 @@ export async function resolveFdicLinks(env,projectId,{autoConfirm=true,maxEpisod
     const strong=best.score>=0.90 && (!second || best.score-second.score>=0.12);
     const status=autoConfirm&&strong?'confirmed':'pending';
     const now=nowIso(),name=String(pick(best.r,['NAME','NAMEFULL','name'])||'');
-    await run(env.DB,`INSERT INTO fdic_episode_links(id,project_id,episode_id,cert,institution_name,match_status,match_method,match_score,candidate_json,confirmed_at,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(project_id,episode_id) DO UPDATE SET cert=excluded.cert,institution_name=excluded.institution_name,match_status=CASE WHEN fdic_episode_links.match_status='confirmed' THEN 'confirmed' ELSE excluded.match_status END,match_method=excluded.match_method,match_score=excluded.match_score,candidate_json=excluded.candidate_json,confirmed_at=CASE WHEN fdic_episode_links.match_status='confirmed' THEN fdic_episode_links.confirmed_at ELSE excluded.confirmed_at END,updated_at=excluded.updated_at`,[
-      uid('fdiclink'),projectId,e.id,cert,name,status,strong?'failure_exact':'failure_fuzzy',best.score,JSON.stringify(scored.map(x=>({cert:pick(x.r,['CERT','cert']),name:pick(x.r,['NAME','NAMEFULL','name']),score:Number(x.score.toFixed(4))}))),status==='confirmed'?now:null,now,now]);
+    linkWrites.push(env.DB.prepare(`INSERT INTO fdic_episode_links(id,project_id,episode_id,cert,institution_name,match_status,match_method,match_score,candidate_json,confirmed_at,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(project_id,episode_id) DO UPDATE SET cert=excluded.cert,institution_name=excluded.institution_name,match_status=CASE WHEN fdic_episode_links.match_status='confirmed' THEN 'confirmed' ELSE excluded.match_status END,match_method=excluded.match_method,match_score=excluded.match_score,candidate_json=excluded.candidate_json,confirmed_at=CASE WHEN fdic_episode_links.match_status='confirmed' THEN fdic_episode_links.confirmed_at ELSE excluded.confirmed_at END,updated_at=excluded.updated_at`).bind(
+      uid('fdiclink'),projectId,e.id,cert,name,status,strong?'failure_exact':'failure_fuzzy',best.score,JSON.stringify(scored.map(x=>({cert:pick(x.r,['CERT','cert']),name:pick(x.r,['NAME','NAMEFULL','name']),score:Number(x.score.toFixed(4))}))),status==='confirmed'?now:null,now,now));
     status==='confirmed'?confirmed++:pending++;
   }
+  for(let i=0;i<linkWrites.length;i+=50)await env.DB.batch(linkWrites.slice(i,i+50));
   await audit(env,projectId,'agent','fdic.links.resolved','fdic_link',null,{episodes:eps.length,confirmed,pending,candidates,failure_total:failureResp.total});
   return {episodes:eps.length,confirmed,pending,candidates,failure_total:failureResp.total};
 }
@@ -251,15 +252,44 @@ export async function getFdicReverificationRankings(env,projectId,{limit=81}={})
 }
 
 export async function fdicStatus(env,projectId){
-  const linkCounts=await one(env.DB,`SELECT COUNT(*) total,SUM(CASE WHEN match_status='confirmed' THEN 1 ELSE 0 END) confirmed,SUM(CASE WHEN match_status='pending' THEN 1 ELSE 0 END) pending FROM fdic_episode_links WHERE project_id=?`,[projectId]);
-  const fin=await one(env.DB,`SELECT COUNT(*) rows,COUNT(DISTINCT episode_id) episodes,MIN(repdte) first_date,MAX(repdte) last_date FROM fdic_financial_observations WHERE project_id=?`,[projectId]);
-  const sod=await one(env.DB,`SELECT COUNT(*) rows,COUNT(DISTINCT episode_id) episodes,MIN(year) first_year,MAX(year) last_year FROM fdic_sod_observations WHERE project_id=?`,[projectId]);
-  const metrics=await one(env.DB,`SELECT COUNT(*) rows,COUNT(DISTINCT episode_id) episodes FROM fdic_market_metrics WHERE project_id=?`,[projectId]);
-  const links=await all(env.DB,`SELECT l.id,l.episode_id,e.episode_name,e.year,l.cert,l.institution_name,l.match_status,l.match_method,l.match_score,l.candidate_json FROM fdic_episode_links l JOIN empirical_episodes e ON e.id=l.episode_id WHERE l.project_id=? ORDER BY CASE l.match_status WHEN 'confirmed' THEN 0 ELSE 1 END,e.year,e.episode_name LIMIT 100`,[projectId]);
-  const latestMetrics=await all(env.DB,`SELECT m.*,e.episode_name FROM fdic_market_metrics m JOIN empirical_episodes e ON e.id=m.episode_id WHERE m.project_id=? ORDER BY m.updated_at DESC LIMIT 30`,[projectId]);
-  const reverification=await getFdicReverificationRankings(env,projectId,{limit:10});
-  const reviews=await one(env.DB,`SELECT COUNT(*) total,SUM(CASE WHEN review_status='RESOLVED' THEN 1 ELSE 0 END) resolved,SUM(CASE WHEN review_status='IN_REVIEW' THEN 1 ELSE 0 END) in_review,SUM(CASE WHEN review_status='ESCALATED' THEN 1 ELSE 0 END) escalated FROM fdic_reverification_reviews WHERE project_id=?`,[projectId]);
-  const reviewRows=await all(env.DB,`SELECT v.review_status,v.cause_code,v.recommended_action,v.reviewer_name,v.evidence_revision,v.reviewed_at,v.updated_at,e.episode_name,e.year,r.priority_level,r.rank_num FROM fdic_reverification_reviews v JOIN empirical_episodes e ON e.id=v.episode_id JOIN fdic_reverification_rankings r ON r.episode_id=v.episode_id AND r.project_id=v.project_id WHERE v.project_id=? ORDER BY CASE v.review_status WHEN 'RESOLVED' THEN 0 WHEN 'ESCALATED' THEN 1 ELSE 2 END,COALESCE(r.rank_num,999) LIMIT 30`,[projectId]);
+  // Status dashboard used to issue 9 sequential reads. D1 batch keeps the same rows
+  // but performs one database round-trip; this endpoint is called often by the UI.
+  const q=[
+    env.DB.prepare(`SELECT COUNT(*) total,SUM(CASE WHEN match_status='confirmed' THEN 1 ELSE 0 END) confirmed,SUM(CASE WHEN match_status='pending' THEN 1 ELSE 0 END) pending FROM fdic_episode_links WHERE project_id=?`).bind(projectId),
+    env.DB.prepare(`SELECT COUNT(*) rows,COUNT(DISTINCT episode_id) episodes,MIN(repdte) first_date,MAX(repdte) last_date FROM fdic_financial_observations WHERE project_id=?`).bind(projectId),
+    env.DB.prepare(`SELECT COUNT(*) rows,COUNT(DISTINCT episode_id) episodes,MIN(year) first_year,MAX(year) last_year FROM fdic_sod_observations WHERE project_id=?`).bind(projectId),
+    env.DB.prepare(`SELECT COUNT(*) rows,COUNT(DISTINCT episode_id) episodes FROM fdic_market_metrics WHERE project_id=?`).bind(projectId),
+    env.DB.prepare(`SELECT l.id,l.episode_id,e.episode_name,e.year,l.cert,l.institution_name,l.match_status,l.match_method,l.match_score,l.candidate_json FROM fdic_episode_links l JOIN empirical_episodes e ON e.id=l.episode_id WHERE l.project_id=? ORDER BY CASE l.match_status WHEN 'confirmed' THEN 0 ELSE 1 END,e.year,e.episode_name LIMIT 100`).bind(projectId),
+    env.DB.prepare(`SELECT m.*,e.episode_name FROM fdic_market_metrics m JOIN empirical_episodes e ON e.id=m.episode_id WHERE m.project_id=? ORDER BY m.updated_at DESC LIMIT 30`).bind(projectId),
+    env.DB.prepare(`SELECT r.*,e.episode_name,e.year,l.institution_name FROM fdic_reverification_rankings r JOIN empirical_episodes e ON e.id=r.episode_id LEFT JOIN fdic_episode_links l ON l.episode_id=r.episode_id AND l.project_id=r.project_id WHERE r.project_id=? ORDER BY CASE r.priority_level WHEN 'CRITICAL' THEN 0 WHEN 'HIGH' THEN 1 WHEN 'MEDIUM' THEN 2 WHEN 'LOW' THEN 3 ELSE 4 END,COALESCE(r.rank_num,999),e.year LIMIT 10`).bind(projectId),
+    env.DB.prepare(`SELECT COUNT(*) total,SUM(CASE WHEN priority_level='CRITICAL' THEN 1 ELSE 0 END) critical,SUM(CASE WHEN priority_level='HIGH' THEN 1 ELSE 0 END) high,SUM(CASE WHEN priority_level='MEDIUM' THEN 1 ELSE 0 END) medium,SUM(CASE WHEN priority_level='LOW' THEN 1 ELSE 0 END) low,SUM(CASE WHEN priority_level='INSUFFICIENT' THEN 1 ELSE 0 END) insufficient,AVG(discrepancy_score) mean_score FROM fdic_reverification_rankings WHERE project_id=?`).bind(projectId),
+    env.DB.prepare(`SELECT COUNT(*) total,SUM(CASE WHEN review_status='RESOLVED' THEN 1 ELSE 0 END) resolved,SUM(CASE WHEN review_status='IN_REVIEW' THEN 1 ELSE 0 END) in_review,SUM(CASE WHEN review_status='ESCALATED' THEN 1 ELSE 0 END) escalated FROM fdic_reverification_reviews WHERE project_id=?`).bind(projectId),
+    env.DB.prepare(`SELECT v.review_status,v.cause_code,v.recommended_action,v.reviewer_name,v.evidence_revision,v.reviewed_at,v.updated_at,e.episode_name,e.year,r.priority_level,r.rank_num FROM fdic_reverification_reviews v JOIN empirical_episodes e ON e.id=v.episode_id JOIN fdic_reverification_rankings r ON r.episode_id=v.episode_id AND r.project_id=v.project_id WHERE v.project_id=? ORDER BY CASE v.review_status WHEN 'RESOLVED' THEN 0 WHEN 'ESCALATED' THEN 1 ELSE 2 END,COALESCE(r.rank_num,999) LIMIT 30`).bind(projectId)
+  ];
+  const b=await env.DB.batch(q);
+  let rr;
+  if(b.every(x=>Array.isArray(x?.results))) rr=b.map(x=>x.results);
+  else {
+    // node/sqlite test shim executes SELECT batches without returning rows; production D1
+    // returns result sets. Fallback keeps compatibility without affecting production reads.
+    rr=await Promise.all([
+      all(env.DB,`SELECT COUNT(*) total,SUM(CASE WHEN match_status='confirmed' THEN 1 ELSE 0 END) confirmed,SUM(CASE WHEN match_status='pending' THEN 1 ELSE 0 END) pending FROM fdic_episode_links WHERE project_id=?`,[projectId]),
+      all(env.DB,`SELECT COUNT(*) rows,COUNT(DISTINCT episode_id) episodes,MIN(repdte) first_date,MAX(repdte) last_date FROM fdic_financial_observations WHERE project_id=?`,[projectId]),
+      all(env.DB,`SELECT COUNT(*) rows,COUNT(DISTINCT episode_id) episodes,MIN(year) first_year,MAX(year) last_year FROM fdic_sod_observations WHERE project_id=?`,[projectId]),
+      all(env.DB,`SELECT COUNT(*) rows,COUNT(DISTINCT episode_id) episodes FROM fdic_market_metrics WHERE project_id=?`,[projectId]),
+      all(env.DB,`SELECT l.id,l.episode_id,e.episode_name,e.year,l.cert,l.institution_name,l.match_status,l.match_method,l.match_score,l.candidate_json FROM fdic_episode_links l JOIN empirical_episodes e ON e.id=l.episode_id WHERE l.project_id=? ORDER BY CASE l.match_status WHEN 'confirmed' THEN 0 ELSE 1 END,e.year,e.episode_name LIMIT 100`,[projectId]),
+      all(env.DB,`SELECT m.*,e.episode_name FROM fdic_market_metrics m JOIN empirical_episodes e ON e.id=m.episode_id WHERE m.project_id=? ORDER BY m.updated_at DESC LIMIT 30`,[projectId]),
+      all(env.DB,`SELECT r.*,e.episode_name,e.year,l.institution_name FROM fdic_reverification_rankings r JOIN empirical_episodes e ON e.id=r.episode_id LEFT JOIN fdic_episode_links l ON l.episode_id=r.episode_id AND l.project_id=r.project_id WHERE r.project_id=? ORDER BY CASE r.priority_level WHEN 'CRITICAL' THEN 0 WHEN 'HIGH' THEN 1 WHEN 'MEDIUM' THEN 2 WHEN 'LOW' THEN 3 ELSE 4 END,COALESCE(r.rank_num,999),e.year LIMIT 10`,[projectId]),
+      all(env.DB,`SELECT COUNT(*) total,SUM(CASE WHEN priority_level='CRITICAL' THEN 1 ELSE 0 END) critical,SUM(CASE WHEN priority_level='HIGH' THEN 1 ELSE 0 END) high,SUM(CASE WHEN priority_level='MEDIUM' THEN 1 ELSE 0 END) medium,SUM(CASE WHEN priority_level='LOW' THEN 1 ELSE 0 END) low,SUM(CASE WHEN priority_level='INSUFFICIENT' THEN 1 ELSE 0 END) insufficient,AVG(discrepancy_score) mean_score FROM fdic_reverification_rankings WHERE project_id=?`,[projectId]),
+      all(env.DB,`SELECT COUNT(*) total,SUM(CASE WHEN review_status='RESOLVED' THEN 1 ELSE 0 END) resolved,SUM(CASE WHEN review_status='IN_REVIEW' THEN 1 ELSE 0 END) in_review,SUM(CASE WHEN review_status='ESCALATED' THEN 1 ELSE 0 END) escalated FROM fdic_reverification_reviews WHERE project_id=?`,[projectId]),
+      all(env.DB,`SELECT v.review_status,v.cause_code,v.recommended_action,v.reviewer_name,v.evidence_revision,v.reviewed_at,v.updated_at,e.episode_name,e.year,r.priority_level,r.rank_num FROM fdic_reverification_reviews v JOIN empirical_episodes e ON e.id=v.episode_id JOIN fdic_reverification_rankings r ON r.episode_id=v.episode_id AND r.project_id=v.project_id WHERE v.project_id=? ORDER BY CASE v.review_status WHEN 'RESOLVED' THEN 0 WHEN 'ESCALATED' THEN 1 ELSE 2 END,COALESCE(r.rank_num,999) LIMIT 30`,[projectId])
+    ]);
+  }
+  const rows=i=>rr[i]||[];
+  const first=i=>rows(i)[0]||{};
+  const linkCounts=first(0),fin=first(1),sod=first(2),metrics=first(3),links=rows(4),latestMetrics=rows(5);
+  const reverification={summary:first(7),rows:rows(6),methodology:{version:'FDIC-REVERIFY-v1',ranking:'mean empirical percentile of available absolute discrepancy dimensions; provenance is a tie-break/context flag rather than a numeric weight',concentration:'|panel concentration C - FDIC state-market HHI|; market definitions may differ, so diagnostic only',deposit:'|panel peak_outflow - FDIC maximum quarterly peak-to-trough deposit drawdown over year-1..year|; measurement windows differ, so diagnostic proxy',priority:'CRITICAL >=80th percentile aggregate; HIGH >=67th; MEDIUM >=33rd; LOW below 33rd; INSUFFICIENT when no comparable dimension'}};
+  const reviews=first(8),reviewRows=rows(9);
   return {links:{total:Number(linkCounts?.total||0),confirmed:Number(linkCounts?.confirmed||0),pending:Number(linkCounts?.pending||0),rows:links},financials:fin||{},sod:sod||{},market_metrics:{...(metrics||{}),rows_detail:latestMetrics},reverification,reviews:{summary:reviews||{},rows:reviewRows},methodology:{financials:'CERT-linked quarterly FDIC Financials, episode year-1 through episode year; stored as verification covariates',sod:'CERT-linked SOD at episode year; optional state-market HHI uses all institutions in target bank primary deposit state',promotion:'FDIC-derived measures do not overwrite thesis concentration/peak_outflow automatically'}};
 }
 

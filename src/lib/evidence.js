@@ -1,5 +1,6 @@
 import { one, run, audit, enqueueOnce } from './db.js';
 import { nowIso, uid } from './util.js';
+import { bust } from './memo.js';
 
 const STAGES=['define','measure','compute','validate','recompute','approved','report'];
 export function impactForEvidence(kind){
@@ -46,6 +47,7 @@ export async function registerEvidence(env,projectId,{kind,impact_from=null,sour
   else if(impact==='measure') await enqueueOnce(env,projectId,'measure_project',{},30,1);
   else if(impact==='compute') await enqueueOnce(env,projectId,'seed_candidates',{},35,1);
   else await enqueueOnce(env,projectId,'define_project',{},10,1);
+  bust(env,projectId);
   await audit(env,projectId,'agent','evidence.registered','project',projectId,{kind,impact,source,nextRevision,nextCycle,fullCycle,detail});
   return{evidence_revision:nextRevision,research_cycle:nextCycle,impact_from:impact,full_cycle:fullCycle};
 }

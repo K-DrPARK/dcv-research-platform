@@ -64,7 +64,7 @@ export async function ensureFrozenProtocol(env,projectId){
 const INTEGRITY_TTL_MS=10*60*1000;
 export async function assertProtocolIntegrity(env,projectId,context={}){
   const cycle=context.cycle==null?Number((await one(env.DB,`SELECT research_cycle FROM projects WHERE id=?`,[projectId]))?.research_cycle||1):Number(context.cycle||1);
-  const head=await one(env.DB,`SELECT protocol_hash FROM research_protocols WHERE project_id=? AND research_cycle=? ORDER BY version DESC LIMIT 1`,[projectId,cycle]);
+  const head=await cached(env,projectId,`integrity-head:${cycle}`,()=>one(env.DB,`SELECT protocol_hash FROM research_protocols WHERE project_id=? AND research_cycle=? ORDER BY version DESC LIMIT 1`,[projectId,cycle]),INTEGRITY_TTL_MS);
   if(!head) return ensureFrozenProtocol(env,projectId);
   const ok=await cached(env,projectId,`integrity:${head.protocol_hash}`,async()=>{
     const latest=await one(env.DB,`SELECT * FROM research_protocols WHERE project_id=? AND research_cycle=? ORDER BY version DESC LIMIT 1`,[projectId,cycle]);

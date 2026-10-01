@@ -506,3 +506,132 @@ body{background:var(--cw-bg)!important;color:var(--cw-ink)!important;overflow-x:
   #detailPanel>.row.g-3.mt-1{grid-template-columns:1fr!important}#empiricalSection,#dataSection,#dataSection + .col-12,#dataSection + .col-12 + .col-12{grid-column:1!important}
   .project-row{grid-template-columns:1fr auto!important}
 }
+
+/* ======================================================================
+   v0.5.18 · Precision grid + balanced layout
+   - exact column/row alignment across paired panels
+   - equal-height compute/project rows without dead zones
+   - consistent gutters independent of Bootstrap negative margins
+   ====================================================================== */
+:root{--layout-gap:18px;--panel-pad:22px}
+
+/* neutralize Bootstrap row offsets inside the primary dashboard */
+#stats,#computeSection,#projectsSection{
+  margin-left:0!important;margin-right:0!important;
+  column-gap:var(--layout-gap)!important;row-gap:var(--layout-gap)!important;
+}
+#stats>*,
+#computeSection>*,
+#projectsSection>*{padding-left:0!important;padding-right:0!important}
+
+/* four metrics use one exact grid, not bootstrap width math */
+#stats{
+  display:grid!important;
+  grid-template-columns:repeat(4,minmax(0,1fr))!important;
+  gap:var(--layout-gap)!important;
+}
+#stats>.col-6,#stats>.col-lg-3{width:auto!important;max-width:none!important}
+.metric-card{height:100%!important;min-height:132px!important;padding:18px 20px!important}
+
+/* compute row: exact 1:1 columns and equal outer height */
+#computeSection{
+  display:grid!important;
+  grid-template-columns:repeat(2,minmax(0,1fr))!important;
+  align-items:stretch!important;
+}
+#computeSection>.col-12{
+  width:auto!important;max-width:none!important;padding:0!important;
+  min-width:0!important;
+}
+#computeSection>.col-12>article{height:100%!important}
+#computeSection>.col-12:nth-child(2)>.row{
+  display:grid!important;
+  grid-template-columns:1fr!important;
+  grid-template-rows:minmax(0,1fr) minmax(0,1fr)!important;
+  gap:var(--layout-gap)!important;
+  margin:0!important;height:100%!important;
+}
+#computeSection>.col-12:nth-child(2)>.row>.col-12{
+  width:auto!important;max-width:none!important;padding:0!important;min-height:0!important;
+}
+#validateSection,#recomputeSection{height:100%!important;min-height:0!important}
+#recomputeSection{overflow:visible!important}
+.chart-wrap{height:100%!important;min-height:440px!important;display:flex!important;flex-direction:column!important}
+#regionCanvas{height:auto!important;min-height:390px!important;flex:1 1 auto!important}
+
+/* evidence cards align to a strict two-column baseline */
+.evidence-grid{
+  display:grid!important;
+  grid-template-columns:repeat(2,minmax(0,1fr))!important;
+  grid-auto-rows:minmax(86px,auto)!important;
+  gap:10px!important;
+}
+.evidence-item{height:100%!important;display:flex!important;flex-direction:column!important;justify-content:center!important}
+
+/* project / approval row: exact paired heights and clean column ratio */
+#projectsSection{
+  display:grid!important;
+  grid-template-columns:minmax(0,1fr) minmax(0,1fr)!important;
+  align-items:stretch!important;
+}
+#projectsSection>.col-12{
+  width:auto!important;max-width:none!important;padding:0!important;min-width:0!important;
+}
+#projectsSection article{height:100%!important}
+#projectsSection>#approvalSection{height:100%!important}
+#projectsSection>#approvalSection>article{height:100%!important}
+.project-list{height:100%!important;align-content:start!important}
+
+/* one reusable 12-col rhythm for detailed research panels */
+#detailPanel>.row.g-3.mt-1{
+  display:grid!important;
+  grid-template-columns:repeat(12,minmax(0,1fr))!important;
+  gap:var(--layout-gap)!important;
+  margin-left:0!important;margin-right:0!important;
+}
+#detailPanel>.row.g-3.mt-1>*{padding:0!important;width:auto!important;max-width:none!important}
+#empiricalSection,#dataSection{grid-column:1/-1!important}
+#dataSection + .col-12{grid-column:1/7!important}
+#dataSection + .col-12 + .col-12{grid-column:7/13!important}
+#dataSection + .col-12>.subpanel,
+#dataSection + .col-12 + .col-12>.subpanel{height:100%!important}
+
+/* table geometry: fixed baselines, no cell drift */
+.fdic-rank-table,.matrix-table,.wb-table{
+  width:100%!important;border-collapse:collapse!important;border-spacing:0!important;table-layout:fixed!important;
+}
+.fdic-rank-table th,.fdic-rank-table td,
+.matrix-table th,.matrix-table td,
+.wb-table th,.wb-table td{
+  vertical-align:middle!important;line-height:1.35!important;
+  padding:9px 10px!important;border-bottom:1px solid #e8edf2!important;
+}
+.fdic-rank-table th,.matrix-table th,.wb-table th{
+  height:38px!important;white-space:nowrap!important;
+}
+.fdic-rank-table td,.matrix-table td,.wb-table td{min-height:40px!important}
+.matrix-table-wrap{overflow:auto!important}
+
+/* make all paired metadata cells visually identical */
+.regret-meta-grid,.human-recompute-grid{
+  display:grid!important;grid-template-columns:repeat(2,minmax(0,1fr))!important;gap:10px!important;
+}
+.regret-meta-grid>div,.human-recompute-grid>div{
+  min-height:64px!important;height:100%!important;display:flex!important;
+  flex-direction:column!important;justify-content:center!important;
+}
+
+/* responsive breakpoints preserve geometry instead of mixed bootstrap widths */
+@media(max-width:1199.98px){
+  #stats{grid-template-columns:repeat(2,minmax(0,1fr))!important}
+  #computeSection,#projectsSection{grid-template-columns:1fr!important}
+  #computeSection>.col-12:nth-child(2)>.row{grid-template-rows:auto auto!important}
+  .chart-wrap{min-height:360px!important}
+}
+@media(max-width:767.98px){
+  :root{--layout-gap:12px}
+  #stats{grid-template-columns:1fr!important}
+  .evidence-grid,.regret-meta-grid,.human-recompute-grid{grid-template-columns:1fr!important}
+  #detailPanel>.row.g-3.mt-1{grid-template-columns:1fr!important}
+  #empiricalSection,#dataSection,#dataSection + .col-12,#dataSection + .col-12 + .col-12{grid-column:1!important}
+}

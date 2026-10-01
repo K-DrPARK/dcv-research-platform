@@ -1,3 +1,15 @@
+## v0.5.18 — Precision Layout + D1 Read Optimization
+
+- Rebuilt the main dashboard on deterministic CSS grids: 4-column metrics, 1:1 Compute/Evidence, 1:1 Projects/Approval, and a 12-column detail grid.
+- Fixed table row/column drift with fixed-layout tables, unified cell heights and consistent gutters.
+- Deferred FDIC / Official Source / External Validation Matrix loads until after the critical project/candidate render and cached them per project cycle/evidence revision.
+- Batched FDIC status dashboard reads into one D1 round-trip in production instead of sequential status queries.
+- Batched Official Data status reads into one D1 round-trip.
+- Removed the FDIC episode-link write N+1 pattern by accumulating writes and using D1 batch.
+- Memoized high-frequency project cycle/evidence metadata and protocol-integrity head reads during candidate simulation.
+- D1 profiler on the same synthetic full pipeline: SELECT count 1,365 → 904 (-33.8%), total query count 4,094 → 3,633 (-11.3%), estimated rows read 5,381 → 4,920 (-8.6%).
+- Lightened the feasible-region canvas to match the white research-portal UI.
+
 ## v0.5.17
 - 청와대/공공 포털형 레이아웃을 다시 정리하고 panel title/subtitle을 항상 2행 구조로 고정해 어색한 줄바꿈을 제거했습니다.
 - 메인 비주얼 바로 아래 `RESEARCH BRIEFING`을 추가해 현재 프로젝트명, stage, 후보수, Evidence revision, 승인 gate를 항상 노출합니다.

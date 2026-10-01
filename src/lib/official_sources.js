@@ -80,8 +80,21 @@ export async function collectOfficialSource(env,projectId,source){
 }
 
 export async function officialSourceStatus(env,projectId){
-  const layers=await all(env.DB,`SELECT * FROM project_case_layers WHERE project_id=? ORDER BY layer_code`,[projectId]);const sources=await all(env.DB,`SELECT id,name,connector_id,case_layer,data_role,enabled,last_fetched_at,last_status,last_record_count,config_json FROM data_sources WHERE project_id=? AND connector_id IS NOT NULL ORDER BY case_layer,created_at`,[projectId]);
-  const obs=await all(env.DB,`SELECT case_layer,connector_id,COUNT(*) rows,COUNT(DISTINCT metric_code) metrics,MIN(period) first_period,MAX(period) last_period FROM official_observations WHERE project_id=? GROUP BY case_layer,connector_id`,[projectId]);const m=Object.fromEntries(obs.map(x=>[x.connector_id,x]));const mappings=await getOfficialMappings(env,projectId);return{layers,mappings,sources:sources.map(s=>({...s,config:safeJson(s.config_json,{}),coverage:m[s.connector_id]||{rows:0,metrics:0}}))};
+  // Three dashboard reads are independent; batch them to one D1 round-trip.
+  const b=await env.DB.batch([
+    env.DB.prepare(`SELECT * FROM project_case_layers WHERE project_id=? ORDER BY layer_code`).bind(projectId),
+    env.DB.prepare(`SELECT id,name,connector_id,case_layer,data_role,enabled,last_fetched_at,last_status,last_record_count,config_json FROM data_sources WHERE project_id=? AND connector_id IS NOT NULL ORDER BY case_layer,created_at`).bind(projectId),
+    env.DB.prepare(`SELECT case_layer,connector_id,COUNT(*) rows,COUNT(DISTINCT metric_code) metrics,MIN(period) first_period,MAX(period) last_period FROM official_observations WHERE project_id=? GROUP BY case_layer,connector_id`).bind(projectId)
+  ]);
+  let layers,sources,obs;
+  if(b.every(x=>Array.isArray(x?.results))){layers=b[0].results;sources=b[1].results;obs=b[2].results;}
+  else [layers,sources,obs]=await Promise.all([
+    all(env.DB,`SELECT * FROM project_case_layers WHERE project_id=? ORDER BY layer_code`,[projectId]),
+    all(env.DB,`SELECT id,name,connector_id,case_layer,data_role,enabled,last_fetched_at,last_status,last_record_count,config_json FROM data_sources WHERE project_id=? AND connector_id IS NOT NULL ORDER BY case_layer,created_at`,[projectId]),
+    all(env.DB,`SELECT case_layer,connector_id,COUNT(*) rows,COUNT(DISTINCT metric_code) metrics,MIN(period) first_period,MAX(period) last_period FROM official_observations WHERE project_id=? GROUP BY case_layer,connector_id`,[projectId])
+  ]);
+  const m=Object.fromEntries(obs.map(x=>[x.connector_id,x])),mappings=await getOfficialMappings(env,projectId);
+  return{layers,mappings,sources:sources.map(s=>({...s,config:safeJson(s.config_json,{}),coverage:m[s.connector_id]||{rows:0,metrics:0}}))};
 }
 
 // Pure/internal hooks for regression tests; not used by API routing.

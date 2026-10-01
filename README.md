@@ -183,3 +183,7 @@ Use **External Data → FDIC Episode Connector → 재검증 우선순위** or c
 BIS CPMI and ECB supervisory observations now enter CDRS as **independent external validation scenarios**, not as silent replacements for the historical panel variables. `D_CPMI` combines the percentile of log cashless-payment volume with the fast-payment share when both are available. `R_ECB` combines LCR and CET1 regulatory-headroom scores and maps the result only inside the predeclared stability-threshold range. The report exposes component-only sensitivity variants.
 
 D1 reads were also profiled and reduced: official observation ingestion now performs one indexed prefetch per source and batch-writes changed rows; the orchestrator avoids candidate-status aggregate scans while compute/validate/recompute jobs are already in flight.
+
+
+### v0.5.10: External Validation Matrix
+Each candidate is tracked across six independent evidence layers: `Synthetic`, `Historical`, `Adversarial`, `BIS`, `ECB`, and `Human`. The dashboard shows PASS/HOLD/FAIL/N/A for every candidate; the same evidence is exported as `validation_matrix.csv` and rendered automatically as thesis Figure 6. BIS/ECB are evaluated as separate official-data stress subsets and missing evidence remains N/A rather than being treated as failure.

@@ -221,3 +221,11 @@
 - Official-source ingestion no longer executes a D1 SELECT inside the observation loop: one source-wide prefetch plus `DB.batch()` writes only changed rows.
 - Consolidated repeated project metadata reads, reduced project-list PRAGMA/COUNT reads, and added an in-flight-job guard before candidate aggregate scans during Cron advancement.
 - Added supporting indexes and D1 profiling documentation. Existing project rows remain non-destructively preserved.
+
+## v0.5.10 — External Validation Matrix
+- Added candidate-level validation layers: Historical, Synthetic, Adversarial, BIS, ECB, Human.
+- Stress simulations now retain subgroup evidence so BIS/ECB external validation is no longer collapsed into one aggregate stress result.
+- Added persistent `candidate_validation_matrix`, dashboard matrix, current-cycle API and CSV export.
+- Added automatic thesis Figure 6 and report section 5.1 with full candidate survival/hold/fail paths.
+- Missing external or human evidence is represented as N/A, never as automatic failure.
+- Matrix refreshes after robust validation and after human recomputation.

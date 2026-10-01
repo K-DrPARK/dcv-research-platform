@@ -17,6 +17,58 @@ const med = xs => { if (!xs.length) return null; const a = [...xs].sort((x, y) =
 const avg = xs => xs.length ? xs.reduce((a, b) => a + b, 0) / xs.length : null;
 const ci = (k, n) => { const w = wilson(k, n); return { k, n, p: r4(w.p), lo: r4(w.lo), hi: r4(w.hi) }; };
 
+const STAGE_KEYS = [
+  ['historical','Historical'],
+  ['synthetic','Synthetic'],
+  ['adversarial','Adversarial'],
+  ['bis','BIS'],
+  ['ecb','ECB'],
+  ['human','Human']
+];
+const STATUS_META = {
+  PASS:{label:'SURVIVED', rank:3},
+  HOLD:{label:'BOUNDARY', rank:2},
+  FAIL:{label:'FAILED', rank:1},
+  MISSING:{label:'N/A', rank:0}
+};
+function classToStatusCode(c){
+  const x=String(c||'').toUpperCase();
+  return x==='FEASIBLE'?'PASS':x==='INFEASIBLE'?'FAIL':x==='UNRESOLVED'?'HOLD':'MISSING';
+}
+function validationToStatusCode(s){
+  const x=String(s||'').toUpperCase();
+  return x==='CONFIRM'?'PASS':x==='REJECT'?'FAIL':x==='HOLD'?'HOLD':'MISSING';
+}
+function combineCodes(xs=[]){
+  const a=xs.filter(Boolean);
+  if(!a.length) return 'MISSING';
+  if(a.every(x=>x==='PASS')) return 'PASS';
+  if(a.some(x=>x==='FAIL')) return 'FAIL';
+  if(a.some(x=>x==='HOLD')) return 'HOLD';
+  if(a.some(x=>x==='PASS')) return 'HOLD';
+  return 'MISSING';
+}
+function inferScenarioMetricCode(score={}, constraints={}){
+  const checks=[];
+  const le=(v,lim)=>{ if(v==null||lim==null||!Number.isFinite(Number(v))||!Number.isFinite(Number(lim))) return; checks.push(Number(v)<=Number(lim)); };
+  le(score.loss_mean,constraints.loss_max);
+  le(score.loss_exceed_rate,constraints.loss_exceed_max);
+  le(score.fp_rate,constraints.fp_max);
+  le(score.fn_rate,constraints.fn_max);
+  le(score.review_burden,constraints.review_burden_max);
+  le(score.recovery_time,constraints.recovery_time_max);
+  if(!checks.length) return 'HOLD';
+  return checks.every(Boolean)?'PASS':'FAIL';
+}
+function subsetScenarioStatus(result, constraints, predicate){
+  const entries=Object.entries(result?.scenario_scores||{}).filter(([k])=>predicate(k));
+  if(!entries.length) return { code:'MISSING', label:STATUS_META.MISSING.label, n:0, basis:'none' };
+  const codes=entries.map(([,v])=>v?.classification?classToStatusCode(v.classification):inferScenarioMetricCode(v||{},constraints));
+  const code=combineCodes(codes);
+  return { code, label:STATUS_META[code].label, n:entries.length, basis:entries.some(([,v])=>v?.classification)?'scenario_classification':'scenario_metric_inference' };
+}
+function wrapStatus(code, extra={}){ const c=STATUS_META[code]||STATUS_META.MISSING; return { code, label:c.label, rank:c.rank, ...extra }; }
+
 export function levelTable(cands, key) {
   const m = new Map();
   for (const c of cands) { const v = c[key] ?? '-'; const e = m.get(v) || { level: v, total: 0, confirmed: 0, boundary: 0 }; e.total++; if (c.klass === 'confirmed') e.confirmed++; if (c.klass === 'boundary') e.boundary++; m.set(v, e); }
@@ -30,6 +82,7 @@ export async function buildThesisData(env, projectId) {
   const cfg = await one(env.DB, `SELECT * FROM project_config WHERE project_id=?`, [projectId]) || {};
   const def = await one(env.DB, `SELECT version,content_json,gate_json,created_at FROM definitions WHERE project_id=? ORDER BY version DESC LIMIT 1`, [projectId]);
   const meas = await one(env.DB, `SELECT metrics_json,quality_json,measured_at FROM measurements WHERE project_id=? ORDER BY measured_at DESC LIMIT 1`, [projectId]);
+  const content = safeJson(def?.content_json, {}), constraints = safeJson(cfg.constraints_json, {}), design = safeJson(cfg.design_json, {});
   const cycle=Number(project.research_cycle||1),rev=Number(project.evidence_revision||0);
   const appr = await one(env.DB, `SELECT * FROM approvals WHERE project_id=? AND research_cycle=? AND evidence_revision=? AND stale_at IS NULL ORDER BY created_at DESC LIMIT 1`, [projectId,cycle,rev]);
   const rmodel = await one(env.DB, `SELECT model_json,version,created_at FROM reviewer_models WHERE project_id=? AND research_cycle=? AND evidence_revision=? ORDER BY version DESC LIMIT 1`, [projectId,cycle,rev]);
@@ -39,7 +92,7 @@ export async function buildThesisData(env, projectId) {
   const cands = candRows.map(c => ({ id: c.id, sigma: r4(c.sigma), tau: c.tau, alpha: r4(c.alpha), K: c.authority_k, d: c.delay_d, W: r4(c.recovery_w), m: r4(c.adjust_m), estimator: c.estimator || 'ema', status: c.status, evidence_status: c.evidence_status, klass: c.klass, boundary_score: r4(c.boundary_score), max_regret: r4(c.max_regret), objective_score: r4(c.objective_score) }));
 
   // simulation_runs 는 한 번만 읽는다(이전: 이 조회 + 단계별 집계 조회로 2회 스캔). decisions 는 단계별 집계용으로 함께 꺼낸다.
-  const runRows = await all(env.DB, `SELECT r.candidate_id,r.phase,r.n,r.loss_mean,r.loss_exceed_rate,r.fp_rate,r.fn_rate,r.review_burden,r.recovery_time,r.regret,r.created_at,COALESCE(json_extract(r.result_json,'$.decisions'),0) AS decisions FROM simulation_runs r JOIN design_candidates c ON c.id=r.candidate_id WHERE r.project_id=? AND c.research_cycle=? ORDER BY r.created_at`, [projectId,cycle]);
+  const runRows = await all(env.DB, `SELECT r.candidate_id,r.phase,r.n,r.loss_mean,r.loss_exceed_rate,r.fp_rate,r.fn_rate,r.review_burden,r.recovery_time,r.regret,r.result_json,r.created_at,COALESCE(json_extract(r.result_json,'$.decisions'),0) AS decisions FROM simulation_runs r JOIN design_candidates c ON c.id=r.candidate_id WHERE r.project_id=? AND c.research_cycle=? ORDER BY r.created_at`, [projectId,cycle]);
   const best = new Map(), byCandPhase = new Map();
   for (const r of runRows) {
     byCandPhase.set(`${r.candidate_id}|${r.phase}`, r);
@@ -68,6 +121,68 @@ export async function buildThesisData(env, projectId) {
   const selectedByPhase = selectedId ? Object.fromEntries(['exploration', 'refinement', 'confirmation', 'historical', 'stress'].map(ph => { const r = byCandPhase.get(`${selectedId}|${ph}`); return [ph, r ? { n: r.n, loss_mean: r4(r.loss_mean), loss_exceed_rate: r4(r.loss_exceed_rate), fp_rate: r4(r.fp_rate), fn_rate: r4(r.fn_rate), review_burden: r4(r.review_burden), recovery_time: r4(r.recovery_time), regret: r4(r.regret) } : null]; }).filter(([, v]) => v)) : {};
   const selectedEvidence = selectedId ? await one(env.DB, `SELECT result_json FROM simulation_runs WHERE project_id=? AND candidate_id=? AND phase IN ('confirmation','historical','stress') ORDER BY CASE phase WHEN 'stress' THEN 3 WHEN 'historical' THEN 2 ELSE 1 END DESC, created_at DESC LIMIT 1`, [projectId,selectedId]) : null;
   const selectedInference = safeJson(selectedEvidence?.result_json,{}).inference || null;
+
+  const validationRows = await all(env.DB, `SELECT v.candidate_id,v.validation_type,v.status,v.result_json,v.evidence_revision,v.created_at FROM validations v LEFT JOIN design_candidates c ON c.id=v.candidate_id WHERE v.project_id=? AND (v.candidate_id IS NULL OR c.research_cycle=?) ORDER BY v.created_at DESC`, [projectId,cycle]);
+  const humanValidation = new Map(), robustValidation = new Map();
+  for (const v of validationRows) {
+    if (v.candidate_id == null) continue;
+    if (v.validation_type === 'human_recompute' && Number(v.evidence_revision || 0) === rev && !humanValidation.has(v.candidate_id)) humanValidation.set(v.candidate_id, v);
+    if (v.validation_type === 'robust' && !robustValidation.has(v.candidate_id)) robustValidation.set(v.candidate_id, v);
+  }
+  const candidateStageSnapshot = (candId) => {
+    const historicalRun = byCandPhase.get(`${candId}|historical`), syntheticRun = byCandPhase.get(`${candId}|confirmation`), stressRun = byCandPhase.get(`${candId}|stress`);
+    const hr=safeJson(historicalRun?.result_json,{}),sr=safeJson(syntheticRun?.result_json,{}),stressResult=safeJson(stressRun?.result_json,{});
+    const hist = wrapStatus(classToStatusCode(hr.validation_groups?.Historical?.classification||hr.classification), { source:'historical_phase' });
+    const syn = wrapStatus(classToStatusCode(sr.validation_groups?.Synthetic?.classification||sr.classification), { source:'confirmation_phase' });
+    const pick=(g,pred)=>{const c=stressResult.validation_groups?.[g]?.classification;if(c)return wrapStatus(classToStatusCode(c),{source:'validation_group'});const z=subsetScenarioStatus(stressResult,constraints,pred);return wrapStatus(z.code,z);};
+    const adv = pick('Adversarial',k=>!/^official_(bis|ecb)_/i.test(k));
+    const bis = pick('BIS',k=>/^official_bis_/i.test(k));
+    const ecb = pick('ECB',k=>/^official_ecb_/i.test(k));
+    const human = wrapStatus(validationToStatusCode(humanValidation.get(candId)?.status), { source:'human_recompute_validation' });
+    return { historical: hist, synthetic: syn, adversarial: adv, bis, ecb, human };
+  };
+  const stageSnapshots = new Map(cands.map(c => [c.id, candidateStageSnapshot(c.id)]));
+  const candidatePool = [];
+  const seenCand = new Set();
+  const pushCand = x => { if (!x || seenCand.has(x.id)) return; seenCand.add(x.id); candidatePool.push(x); };
+  finalists.forEach(pushCand);
+  if (selected) pushCand(selected);
+  cands.filter(c => c.klass === 'boundary').sort((a,b)=>(b.boundary_score||0)-(a.boundary_score||0)||((a.max_regret??9e9)-(b.max_regret??9e9))).slice(0,4).forEach(pushCand);
+  cands.filter(c => c.klass !== 'boundary' && c.klass !== 'confirmed').sort((a,b)=>((a.max_regret??9e9)-(b.max_regret??9e9))||((b.boundary_score||0)-(a.boundary_score||0))).slice(0,3).forEach(pushCand);
+  cands.sort((a,b)=>((a.max_regret??9e9)-(b.max_regret??9e9))||((b.boundary_score||0)-(a.boundary_score||0))).forEach(pushCand);
+  const matrixRows = candidatePool.map((c, i) => {
+    const statuses = stageSnapshots.get(c.id) || {};
+    const values = STAGE_KEYS.map(([k]) => statuses[k] || wrapStatus('MISSING'));
+    const survived_count = values.filter(v => v.code === 'PASS').length;
+    const available_count = values.filter(v => v.code !== 'MISSING').length;
+    const failed_count = values.filter(v => v.code === 'FAIL').length;
+    const boundary_count = values.filter(v => v.code === 'HOLD').length;
+    const overall_code = failed_count ? 'FAIL' : boundary_count ? 'HOLD' : survived_count ? 'PASS' : 'MISSING';
+    return {
+      rank: i + 1,
+      candidate_id: c.id,
+      label: `${String(c.estimator || 'ema').toUpperCase()} · σ=${c.sigma} · α=${c.alpha} · K=${c.K}`,
+      short_label: `#${i + 1}`,
+      sigma: c.sigma, alpha: c.alpha, K: c.K, d: c.d, W: c.W, m: c.m, estimator: c.estimator,
+      klass: c.klass, max_regret: c.max_regret, boundary_score: c.boundary_score,
+      survived_count, available_count, failed_count, boundary_count, overall_code,
+      statuses
+    };
+  });
+  const matrixSummary = STAGE_KEYS.map(([key, label]) => {
+    const counts = { PASS:0, FAIL:0, HOLD:0, MISSING:0 };
+    for (const c of cands) counts[(stageSnapshots.get(c.id)?.[key]?.code)||'MISSING']++;
+    const observed = counts.PASS + counts.FAIL + counts.HOLD;
+    return { stage_key:key, stage:label, ...counts, total:cands.length, observed, coverage:r4(cands.length ? observed / cands.length : 0), survival_rate:r4(observed ? counts.PASS / observed : 0) };
+  });
+  const validation_matrix = {
+    stages: STAGE_KEYS.map(([key, label]) => ({ key, label })),
+    rows: matrixRows,
+    summary: matrixSummary,
+    displayed_rows: matrixRows.length,
+    total_candidates: cands.length,
+    note: 'Historical/Synthetic use phase classifications. Adversarial/BIS/ECB are derived from stress-scenario subsets; when scenario-level classifications are absent, stored scenario metrics are checked against current loss/false-positive/false-negative/review-burden/recovery-time constraints when available. Human uses the latest current evidence_revision human_recompute validation.'
+  };
 
   const phaseAgg = new Map();
   for (const r of runRows) { const e = phaseAgg.get(r.phase) || { phase: r.phase, runs: 0, episodes: 0, decisions: 0 }; e.runs++; e.episodes += Number(r.n) || 0; e.decisions += Number(r.decisions) || 0; phaseAgg.set(r.phase, e); }
@@ -119,7 +234,6 @@ export async function buildThesisData(env, projectId) {
 
   const jobs = await all(env.DB, `SELECT type,status,COUNT(*) n FROM jobs WHERE project_id=? GROUP BY type,status ORDER BY type,status`, [projectId]);
   const audit = await one(env.DB, `SELECT COUNT(*) n, MIN(created_at) first_at, MAX(created_at) last_at FROM audit_log WHERE project_id=?`, [projectId]);
-  const content = safeJson(def?.content_json, {}), constraints = safeJson(cfg.constraints_json, {}), design = safeJson(cfg.design_json, {});
   return {
     generated_at: nowIso(), app_version: APP_VERSION,
     project: { id: project.id, name: project.name, description: project.description, status: project.status, stage: project.current_stage, created_at: project.created_at, research_cycle:cycle, evidence_revision:rev, revalidation_from:project.revalidation_from, approval_stale:!!project.approval_stale, last_evidence_at:project.last_evidence_at },
@@ -128,7 +242,7 @@ export async function buildThesisData(env, projectId) {
     candidates: { total: cands.length, by_class: byClass, list: cands, dims, cells, estimators, finalists },
     selected: selected ? { ...selected, by_phase: selectedByPhase, inference:selectedInference } : null,
     approval: appr ? { decision: appr.decision, evidence_level: appr.evidence_level, automatic: !!appr.automatic, created_at: appr.created_at, basis: safeJson(appr.basis_json, {}) } : null,
-    simulation: { phases, scenarios, validations }, reviewer, empirical: { readiness: empirical.status, complete_rows: empirical.complete_rows, target_rows: empirical.target_rows, profile: cal.profile?.version, coefficients: cal.coeff, calibration_uncertainty: cal.local_refit?.uncertainty || null, loss_calibration: cal.loss, parameters: params, panel, fdic, official_sources },
+    simulation: { phases, scenarios, validations }, validation_matrix, reviewer, empirical: { readiness: empirical.status, complete_rows: empirical.complete_rows, target_rows: empirical.target_rows, profile: cal.profile?.version, coefficients: cal.coeff, calibration_uncertainty: cal.local_refit?.uncertainty || null, loss_calibration: cal.loss, parameters: params, panel, fdic, official_sources },
     reproducibility: { design_seed: hashString(`${projectId}:design`), protocol: protocol ? {version:protocol.version,hash:protocol.protocol_hash,frozen_at:protocol.frozen_at,status:protocol.status,definition_version:protocol.definition_version} : null, jobs, audit: { n: audit?.n ?? 0, first_at: audit?.first_at, last_at: audit?.last_at } }
   };
 }
@@ -157,8 +271,9 @@ export async function exportCsv(env, projectId, name) {
     case 'official_observations': return q(`SELECT connector_id,case_layer,jurisdiction,metric_code,series_key,period,value_num,value_text,unit,observed_at,fetched_at FROM official_observations WHERE project_id=? ORDER BY case_layer,connector_id,metric_code,period`, ['connector_id','case_layer','jurisdiction','metric_code','series_key','period','value_num','value_text','unit','observed_at','fetched_at']);
     case 'official_sync_runs': return q(`SELECT connector_id,case_layer,status,fetched_rows,changed_rows,started_at,completed_at,error_text FROM official_source_sync_runs WHERE project_id=? ORDER BY started_at`, ['connector_id','case_layer','status','fetched_rows','changed_rows','started_at','completed_at','error_text']);
     case 'official_mappings': return q(`SELECT connector_id,mapping_key,method_version,period,value_num,components_json,sensitivity_json,updated_at FROM external_validation_metrics WHERE project_id=? ORDER BY mapping_key`, ['connector_id','mapping_key','method_version','period','value_num','components_json','sensitivity_json','updated_at']);
+    case 'validation_matrix': return q(`SELECT m.candidate_id,c.estimator,c.sigma,c.alpha,c.authority_k,c.delay_d,m.synthetic_status,m.historical_status,m.adversarial_status,m.bis_status,m.ecb_status,m.human_status,m.overall_status,m.updated_at FROM candidate_validation_matrix m JOIN design_candidates c ON c.id=m.candidate_id WHERE m.project_id=? ORDER BY m.overall_status,c.max_regret,c.authority_k DESC`, ['candidate_id','estimator','sigma','alpha','authority_k','delay_d','synthetic_status','historical_status','adversarial_status','bis_status','ecb_status','human_status','overall_status','updated_at']);
     case 'audit_log': return q(`SELECT created_at,actor,action,entity_type,entity_id,detail_json FROM audit_log WHERE project_id=? ORDER BY created_at`, ['created_at', 'actor', 'action', 'entity_type', 'entity_id', 'detail_json']);
     default: return null;
   }
 }
-export const EXPORT_NAMES = ['candidates', 'simulation_runs', 'validations', 'reviewer_observations', 'episodes', 'fdic_links', 'fdic_financials', 'fdic_sod', 'fdic_market_metrics', 'fdic_reverification', 'fdic_reverification_reviews', 'official_observations', 'official_sync_runs', 'official_mappings', 'audit_log'];
+export const EXPORT_NAMES = ['candidates', 'simulation_runs', 'validations', 'reviewer_observations', 'episodes', 'fdic_links', 'fdic_financials', 'fdic_sod', 'fdic_market_metrics', 'fdic_reverification', 'fdic_reverification_reviews', 'official_observations', 'official_sync_runs', 'official_mappings', 'validation_matrix', 'audit_log'];

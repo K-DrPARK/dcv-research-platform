@@ -20,6 +20,7 @@ export function figureCatalog(t) {
   if (t.candidates.finalists.length) figs.push({ n: 3, file: 'fig3_regret_ranking', title: '강건 후보의 Minimax Regret 순위 (낮을수록 우수)' });
   if (t.reviewer.by_confidence.length) figs.push({ n: 4, file: 'fig4_reviewer_reliance', title: 'AI 신뢰도별 인간 검토자 수용률 (AI 정답/오답 구분, 95% CI)' });
   if (t.empirical.panel.n) figs.push({ n: 5, file: 'fig5_episode_panel', title: '위기 사례 패널: 최대 유출률 대비 심각도 (파산 여부 구분)' });
+  if (t.validation_matrix?.rows?.length) figs.push({ n: 6, file: 'fig6_external_validation_matrix', title: '후보별 External Validation Matrix (Historical · Synthetic · Adversarial · BIS · ECB · Human)' });
   return figs;
 }
 
@@ -77,6 +78,22 @@ export function figRegret(t) {
   });
   body += `<line x1="${m.l}" x2="${m.l}" y1="${m.t}" y2="${H - m.b}" stroke="${C.ink}"/>` + text(m.l + (W - m.l - m.r) / 2, H - 14, 'Maximum regret', { anchor: 'middle', size: 13, weight: 700 }) + (sel ? legendRow(m.l, H - 34, [{ mark: `<rect width="12" height="12" y="-6" fill="${C.ok}"/>`, label: '최종 선택 후보', w: 140 }]) : '');
   return wrap(W, H, body, '강건 후보의 Minimax Regret 순위');
+}
+
+
+export function figExternalValidationMatrix(t) {
+  const vm=t.validation_matrix||t.simulation?.validation_matrix||{rows:[],stages:[],summary:[]};
+  const rows=vm.rows||[],stages=vm.stages||[];
+  if(!rows.length||!stages.length)return wrap(720,200,text(360,100,'External validation matrix unavailable',{anchor:'middle',size:16,weight:700}),'후보별 external validation matrix');
+  const rowH=rows.length>90?12:rows.length>50?15:20,W=1080,m={l:300,r:110,t:82,b:94},colW=(W-m.l-m.r)/stages.length,H=m.t+m.b+rows.length*rowH;
+  const fill={PASS:C.ok,FAIL:C.bad,HOLD:C.warn,MISSING:'#d9d9d9'},glyph={PASS:'✓',FAIL:'×',HOLD:'△',MISSING:'–'};
+  let body=text(m.l,28,'External Validation Matrix',{size:17,weight:700})+text(m.l,49,'Historical · Synthetic · Adversarial · BIS · ECB · Human 검증층의 후보별 생존 상태',{size:11.5,fill:C.mute});
+  stages.forEach((st,i)=>{body+=`<rect x="${m.l+i*colW}" y="${m.t-31}" width="${colW}" height="27" fill="#fafafa" stroke="${C.grid}"/>`+text(m.l+i*colW+colW/2,m.t-12,st.label,{anchor:'middle',size:11.5,weight:700});});
+  body+=`<rect x="${W-m.r+9}" y="${m.t-31}" width="76" height="27" fill="#fafafa" stroke="${C.grid}"/>`+text(W-m.r+47,m.t-12,'Overall',{anchor:'middle',size:11.5,weight:700});
+  rows.forEach((r,j)=>{const y=m.t+j*rowH,lab=`${estName(r.estimator)} σ=${fx(r.sigma)} α=${fx(r.alpha)} K=${r.K??'-'} d=${fx(r.d??0)}`;if(rowH>=15||j%4===0)body+=text(m.l-8,y+rowH*.72,lab,{anchor:'end',size:rowH>=20?10.5:8.5,weight:r.overall_code==='PASS'?700:400,fill:r.overall_code==='FAIL'?C.bad:C.ink});stages.forEach((st,i)=>{const code=r.statuses?.[st.key]?.code||'MISSING',x=m.l+i*colW;body+=`<rect x="${x}" y="${y}" width="${colW}" height="${Math.max(7,rowH-2)}" fill="${fill[code]||fill.MISSING}" stroke="#fff"/>`;if(rowH>=18)body+=text(x+colW/2,y+rowH*.72,glyph[code]||'–',{anchor:'middle',size:11,weight:700,fill:code==='PASS'||code==='FAIL'?'#fff':C.ink});});const oc=r.overall_code||'MISSING';body+=`<rect x="${W-m.r+9}" y="${y}" width="76" height="${Math.max(7,rowH-2)}" fill="${fill[oc]||fill.MISSING}" stroke="#fff"/>`;});
+  const summaryLine=(vm.summary||[]).map(x=>`${x.stage} ${x.PASS||0}/${x.observed||0}`).join('   ·   ');body+=text(m.l,H-51,`PASS / 관측 후보: ${summaryLine}`,{size:10.5,fill:C.mute});
+  body+=legendRow(m.l,H-21,[{mark:`<rect width="12" height="12" y="-6" fill="${fill.PASS}"/>`,label:'PASS',w:85},{mark:`<rect width="12" height="12" y="-6" fill="${fill.HOLD}"/>`,label:'HOLD',w:85},{mark:`<rect width="12" height="12" y="-6" fill="${fill.FAIL}"/>`,label:'FAIL',w:85},{mark:`<rect width="12" height="12" y="-6" fill="${fill.MISSING}"/>`,label:'N/A',w:110},{mark:'',label:`N=${rows.length} candidates`,w:150}]);
+  return wrap(W,H,body,'후보별 external validation matrix');
 }
 
 export function figReviewer(t) {
@@ -264,7 +281,7 @@ export function figRegionConcept() {
   return wrap(W, H, b, '위임 가능 영역 개념도: 이상적 검토자와 실제 검토자');
 }
 
-const BUILDERS = { 1: figHeatmap, 2: figEstimators, 3: figRegret, 4: figReviewer, 5: figEpisodes, 10: figFullBlueprint, 11: figResearchModel, 12: figDcvDesign, 13: figRegionConcept };
+const BUILDERS = { 1: figHeatmap, 2: figEstimators, 3: figRegret, 4: figReviewer, 5: figEpisodes, 6: figExternalValidationMatrix, 10: figFullBlueprint, 11: figResearchModel, 12: figDcvDesign, 13: figRegionConcept };
 export function buildFigures(t) {
   return figureCatalog(t).map(g => { const svg = BUILDERS[g.n](t), m = /viewBox="0 0 (\d+) (\d+)"/.exec(svg); return { ...g, svg, width: +m[1], height: +m[2] }; });
 }

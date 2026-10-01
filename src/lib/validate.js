@@ -2,6 +2,7 @@ import { all, one, run, audit, enqueue } from './db.js';
 import { latestDefinition } from './define.js';
 import { nowIso, uid, safeJson } from './util.js';
 import { computeRegretTable } from './compute.js';
+import { refreshValidationMatrix } from './validation_matrix.js';
 
 function latestPhaseEvidence(rows,phase){
   const x=rows.find(r=>r.phase===phase); return x?safeJson(x.result_json,{}):null;
@@ -35,6 +36,7 @@ export async function validateProject(env,projectId){
   }
   for(let i=0;i<inserts.length;i+=50)await env.DB.batch(inserts.slice(i,i+50));   // 후보당 개별 INSERT 왕복 → 50건 배치
   const result={confirmed,boundary,rejected,total:cands.length,minimax_candidate:regret[0]||null};
+  await refreshValidationMatrix(env,projectId);
   await audit(env,projectId,'agent','validate.robust.complete','project',projectId,result);
   const rm=await one(env.DB,`SELECT id FROM reviewer_models WHERE project_id=? AND research_cycle=? AND evidence_revision=? LIMIT 1`,[projectId,cycle,rev]);
   if(rm&&confirmed>0)await enqueue(env,projectId,'recompute_project',{},65); else if(confirmed>0)await enqueue(env,projectId,'fit_reviewer',{},60);

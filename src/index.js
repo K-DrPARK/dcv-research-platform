@@ -13,6 +13,7 @@ import { registerEvidence, approvalGates } from './lib/evidence.js';
 import { SOURCE_PRESETS } from './lib/source_presets.js';
 import { resolveFdicLinks, confirmFdicLink, fdicStatus, enableFdicConnectors, buildFdicReverificationRankings, getFdicReverificationRankings, getFdicReverificationWorkbench, saveFdicReverificationReview, attachFdicReviewEvidenceRevision } from './lib/fdic.js';
 import { OFFICIAL_CONNECTORS, enableOfficialConnector, officialSourceStatus } from './lib/official_sources.js';
+import { getValidationMatrix, refreshValidationMatrix } from './lib/validation_matrix.js';
 
 async function bodyJson(request){ try{return await request.json();}catch{return {};} }
 function pathParts(url){ return new URL(url).pathname.split('/').filter(Boolean); }
@@ -124,6 +125,8 @@ async function api(request,env){
       ]);
       const ev=await registerEvidence(env,projectId,{kind:'HUMAN_TRIAL',source:'reviewer_ui',detail:{observation_id:id}}); return json({id,revalidation:ev},201);
     }
+    if(parts[3]==='validation-matrix' && method==='GET'){ return json(await getValidationMatrix(env,projectId)); }
+    if(parts[3]==='validation-matrix' && method==='POST'){ return json(await refreshValidationMatrix(env,projectId)); }
     if(parts[3]==='scenarios' && method==='GET'){ return json({scenarios:await all(env.DB,`SELECT * FROM scenarios WHERE project_id=? ORDER BY scenario_type,name`,[projectId])}); }
     if(parts[3]==='scenarios' && method==='POST'){
       const b=await bodyJson(request), rows=Array.isArray(b)?b:(b.rows||[b]), stmts=[];

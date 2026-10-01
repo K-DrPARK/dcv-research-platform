@@ -1,5 +1,6 @@
-import { all, run, audit, enqueue, enqueueMany } from './db.js';
+import { all, one, run, audit, enqueue, enqueueMany } from './db.js';
 import { nowIso, uid, safeJson } from './util.js';
+import { refreshValidationMatrix } from './validation_matrix.js';
 
 export async function enqueueRecompute(env,projectId){
   const p=await one(env.DB,`SELECT research_cycle,evidence_revision FROM projects WHERE id=?`,[projectId]); const cycle=Number(p?.research_cycle||1),rev=Number(p?.evidence_revision||0);
@@ -23,5 +24,5 @@ export async function finalizeRecompute(env,projectId){
     stmts.push(env.DB.prepare(`INSERT INTO validations(id,project_id,candidate_id,validation_type,status,result_json,created_at,evidence_revision) VALUES(?,?,?,?,?,?,?,?)`).bind(uid('val'),projectId,x.id,'human_recompute',status,JSON.stringify({classification:ev?.classification||null,metrics:ev?.metrics||null,ci:ev?.ci||null,boundary_score:ev?.boundary_score||null,reviewer_used:ev?.reviewer_used||false}),ts,rev));
   }
   for(let i=0;i<stmts.length;i+=50)await env.DB.batch(stmts.slice(i,i+50));
-  const result={confirmed,rejected,hold,total:ids.length};await audit(env,projectId,'agent','recompute.finalize','project',projectId,result);if(confirmed>0)await enqueue(env,projectId,'approve_project',{},90);return result;
+  const result={confirmed,rejected,hold,total:ids.length};await refreshValidationMatrix(env,projectId);await audit(env,projectId,'agent','recompute.finalize','project',projectId,result);if(confirmed>0)await enqueue(env,projectId,'approve_project',{},90);return result;
 }

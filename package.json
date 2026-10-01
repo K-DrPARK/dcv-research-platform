@@ -1,6 +1,6 @@
 {
   "name": "dcv-research-platform",
-  "version": "0.6.0",
+  "version": "0.6.1",
   "private": true,
   "type": "module",
   "scripts": {
@@ -17,6 +17,7 @@
     "storage:check": "node scripts/remote-project-guard.mjs check",
     "predev": "node scripts/prepare-lab-code.mjs",
     "predeploy": "node scripts/prepare-lab-code.mjs",
+    "redesign:audit": "node scripts/audit-redesign.mjs",
     "lab:bundle": "node scripts/prepare-lab-code.mjs",
     "lab:test": "node --test tests/lab*.test.mjs"
   },

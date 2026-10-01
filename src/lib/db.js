@@ -59,7 +59,11 @@ export async function enqueueMany(env, projectId, type, payloads=[], priority=10
   // One D1 batch + chunked queue sends instead of one round-trip per job (Free plan subrequest limit).
   if (!payloads.length) return 0;
   const now = nowIso(), ids = payloads.map(()=>uid('job'));
-  await env.DB.batch(payloads.map((pl,i)=>env.DB.prepare(`INSERT INTO jobs(id,project_id,type,status,priority,payload_json,phase,run_after,created_at,updated_at) VALUES(?,?,?,'queued',?,?,?,?,?,?)`).bind(ids[i], projectId, type, priority, JSON.stringify(pl), pl?.phase ?? null, now, now, now)));
+  const inserts=[];
+  for(let offset=0;offset<payloads.length;offset+=100){const rows=payloads.slice(offset,offset+100).map((pl,i)=>({id:ids[offset+i],payload:pl,phase:pl?.phase??null}));
+    inserts.push(env.DB.prepare(`INSERT INTO jobs(id,project_id,type,status,priority,payload_json,phase,run_after,created_at,updated_at)
+      SELECT json_extract(value,'$.id'),?,?,'queued',?,json_extract(value,'$.payload'),json_extract(value,'$.phase'),?,?,? FROM json_each(?)`).bind(projectId,type,priority,now,now,now,JSON.stringify(rows)));}
+  await env.DB.batch(inserts);
   await sendWake(env, ids.map(id=>({ job_id:id, project_id:projectId, type })));
   return ids.length;
 }

@@ -122,11 +122,12 @@ export function buildModelSection(t, { figLine = () => '', estName = e => e, cle
 
   S('**(다) 판단·위임·인간 검토**', '',
     eq('dec', `a_{t}=\\mathbb 1[\\hat z_{t}>\\lambda],\\quad s_{t}=\\mathbb 1[\\mathrm{logistic}(z_{t})>\\theta_{0}],\\quad \\lambda=\\ln\\frac{\\theta_{0}}{1-\\theta_{0}},\\quad \\theta_{0}=${fmt(cfg.th0)}`),
-    eq('conf', '\\Phi_{t}=\\mathrm{clip}\\left(0.5+0.5\\left(1-e^{-\\mid\\hat z_{t}-\\lambda\\mid/(\\sqrt{P_{t}}+0.12)}\\right),\\ 0.5,\\ 0.999\\right)'),
+    eq('conf', bm.confidence_method==='residual_common_v1'?'\\Phi_t=\\mathrm{clip}(0.5+0.5(1-e^{-\\mid\\hat z_t-\\lambda\\mid/\\sqrt{\\max(\\sigma^2,V_{t-1})}}),0.5,0.999)': '\\Phi_{t}=\\mathrm{clip}(0.5+0.5(1-e^{-\\mid\\hat z_{t}-\\lambda\\mid/(\\sqrt{P_t}+0.12)}),0.5,0.999)'),
     eq('rev', `r_{t}=\\mathbb 1\\left[K\\le1\\ \\text{or}\\ \\text{safe}_{t}>0\\ \\text{or}\\ (K=2\\ \\text{and}\\ \\Phi_{t}<${cfg.k2})\\ \\text{or}\\ (K=3\\ \\text{and}\\ \\Phi_{t}<${cfg.k3})\\right]`),
-    eq('ovr', 'P(\\hat a_{t}=s_{t}\\mid a_{t}\\ne s_{t},\\,r_{t}=1)=q_{o},\\qquad P(\\hat a_{t}\\ne a_{t}\\mid a_{t}=s_{t},\\,r_{t}=1)=u\\,(1-\\Phi_{t})'), '',
-    `$a_t$는 알고리즘 판단, $s_t$는 실제 정지 필요 여부, $\\Phi_t$는 신뢰도, $r_t$는 인간 검토 여부, $\\hat a_t$는 최종 집행이다. $q_o$(정정 개입률)와 $u$(불필요 개입률)는 기본값이 아니라 인간 검토자 실험에서 추정한 값으로 교체된다(식 ${n('arr')}~${n('hpar')}).`, '');
+    eq('ovr', 'P(\\hat a_{t}=s_{t}\\mid a_{t}\\ne s_{t},\\,r_{t}=1)=q_{o},\\qquad P(\\hat a_{t}\\ne a_{t}\\mid a_{t}=s_{t},\\,r_{t}=1)=u'), '',
+    `$a_t$는 알고리즘 판단, $s_t$는 실제 정지 필요 여부, $\\Phi_t$는 신뢰도, $r_t$는 인간 검토 여부, $\\hat a_t$는 최종 집행이다. $q_o$(정정 개입률)와 $u$(불필요 개입률)는 현재 revision의 표본 기준을 충족한 인간 검토자 모델이 있을 때 재계산에 사용하며, 그 이전에는 검증되지 않은 설계 prior를 사용한다(식 ${n('arr')}~${n('hpar')}).`, '');
 
+  S('공통 신뢰도는 네 추정기의 이전 상태에 대한 지연 관측의 1-step 잔차 제곱을 동일한 EWMA 규칙으로 갱신한 V를 사용한다. 현재 관측 잔차는 다음 단계에 반영하며 정답 s는 신뢰도에 입력하지 않는다. ECE와 신뢰도 분포는 별도 진단이며 확률 교정을 보장하지 않는다. K0/K1의 전량 검토는 정의상 점검 기준선이다. 검토 지연은 d 일과 실험 응답시간을 86400으로 나눈 일 단위의 합이며 자율 실행은 0.02일 기본값이다.', '');
   S('**(라) 손실·복구·목적함수**', '',
     eq('loss', `\\ell_{t}=c_{FP}\\,\\mathbb 1_{FP,t}+c_{FN}\\,\\mathbb 1_{FN,t}+e_{t}+h_{t}+c_{R}r_{t},\\qquad (c_{FP},c_{FN},c_{R})=(${fmt(cfg.cFP)},${fmt(cfg.cFN)},${fmt(cfg.cReview)})`),
     eq('expo', `e_{t}=c_{FN}\\,\\mathbb 1[\\hat a_{t}=0]\\cdot\\max(0,\\mathrm{logistic}(z_{t})-\\theta_{0})\\left(1+\\frac{\\Delta_{t}}{T}\\right),\\qquad c_{FN}=${fmt(cfg.cFN)}`),

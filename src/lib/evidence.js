@@ -24,7 +24,7 @@ async function snapshot(env,p,reason,nextRevision,nextCycle){
   const snap={project_status:p.status,current_stage:p.current_stage,research_cycle:Number(p.research_cycle||1),evidence_revision:Number(p.evidence_revision||0),counts};
   await run(env.DB,`INSERT INTO evidence_snapshots(id,project_id,research_cycle,evidence_revision,reason,snapshot_json,created_at) VALUES(?,?,?,?,?,?,?)`,[uid('snapshot'),p.id,Number(p.research_cycle||1),nextRevision,reason,JSON.stringify(snap),nowIso()]);
 }
-export async function registerEvidence(env,projectId,{kind,impact_from=null,source='user',detail={},force_new_cycle=false}={}){
+export async function registerEvidence(env,projectId,{kind,impact_from=null,source='user',detail={},force_new_cycle=false,config_update=null}={}){
   const p=await one(env.DB,`SELECT * FROM projects WHERE id=?`,[projectId]);if(!p)throw new Error('project_not_found');
   const impact=impact_from||impactForEvidence(kind);
   const started=await one(env.DB,`SELECT 1 x FROM design_candidates WHERE project_id=? AND research_cycle=? LIMIT 1`,[projectId,Number(p.research_cycle||1)]);
@@ -33,6 +33,7 @@ export async function registerEvidence(env,projectId,{kind,impact_from=null,sour
   if(fullCycle) await snapshot(env,p,`${kind}:${impact}`,nextRevision,nextCycle);
   const from=earlierStage(earlierStage(p.current_stage||impact,p.revalidation_from||impact),impact);
   await env.DB.batch([
+    ...(config_update?[env.DB.prepare('UPDATE project_config SET design_json=?,benchmark_json=?,validation_json=? WHERE project_id=?').bind(JSON.stringify(config_update.design),JSON.stringify(config_update.benchmark),JSON.stringify(config_update.validation),projectId)]:[]),
     env.DB.prepare(`UPDATE projects SET evidence_revision=?,research_cycle=?,revalidation_from=?,approval_stale=1,last_evidence_at=?,status='revalidating',current_stage=?,reviewer_hold_marker=NULL,candidate_count=CASE WHEN ? THEN 0 ELSE candidate_count END,updated_at=? WHERE id=?`).bind(nextRevision,nextCycle,from,ts,from,fullCycle?1:0,ts,projectId),
     env.DB.prepare(`UPDATE approvals SET stale_at=COALESCE(stale_at,?),stale_reason=COALESCE(stale_reason,?) WHERE project_id=? AND stale_at IS NULL`).bind(ts,`${kind}:${impact}`,projectId),
     env.DB.prepare(`UPDATE reports SET stale_at=COALESCE(stale_at,?),stale_reason=COALESCE(stale_reason,?) WHERE project_id=? AND stale_at IS NULL`).bind(ts,`${kind}:${impact}`,projectId),

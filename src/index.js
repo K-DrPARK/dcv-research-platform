@@ -1,3 +1,5 @@
+import {applyRedesign} from './lib/redesign.js';
+import {createHumanTrial,recordHumanTrial} from './lib/human_trials.js';
 import { json, nowIso, uid, safeJson } from './lib/util.js';
 import { requireAdmin } from './lib/auth.js';
 import { all, one, run, enqueue, enqueueOnce, audit } from './lib/db.js';
@@ -77,6 +79,8 @@ async function api(request,env){
 
   if(parts[0]==='api' && parts[1]==='projects' && parts[2]){
     const projectId=parts[2];
+    if(parts[3]==='redesign'&&method==='POST'){try{return json(await applyRedesign(env,projectId,await bodyJson(request)),201);}catch(e){return json({error:e.message},400);}}
+    if(parts[3]==='reviewer-trials'&&method==='POST'){try{return json(await createHumanTrial(env,projectId,(await bodyJson(request)).participant_hash),201);}catch(e){return json({error:e.message},400);}}
     if(parts[3]==='lab'){
       try{return await labApi(request,env,projectId,parts);}
       catch(e){return json({error:String(e.message||e)},/project_not_found/.test(String(e))?404:400);}
@@ -98,6 +102,7 @@ async function api(request,env){
           regretMeta={...regretMeta,scenario_count:hk.length+sk.length,historical_scenarios:hk.length,stress_scenarios:sk.length,adversarial_scenarios:Math.max(0,sk.length-bis-ecb),bis_scenarios:bis,ecb_scenarios:ecb,last_updated_at:[counts?.regret_updated_at,latest.historical?.created_at,latest.stress?.created_at].filter(Boolean).sort().pop()||null};
         }
       }
+      regretMeta.evidence_available=regretMeta.scenario_count>0;if(!regretMeta.evidence_available)counts.min_regret=null;
       const app=await one(env.DB,`SELECT * FROM approvals WHERE project_id=? AND research_cycle=? AND evidence_revision=? AND stale_at IS NULL ORDER BY created_at DESC LIMIT 1`,[projectId,cycle,rev]);
       const staleApproval=await one(env.DB,`SELECT * FROM approvals WHERE project_id=? AND stale_at IS NOT NULL ORDER BY stale_at DESC LIMIT 1`,[projectId]);
       const reviewer=await one(env.DB,`SELECT model_json,version,created_at FROM reviewer_models WHERE project_id=? AND research_cycle=? AND evidence_revision=? ORDER BY version DESC LIMIT 1`,[projectId,cycle,rev]);
@@ -134,7 +139,7 @@ async function api(request,env){
       if(stmts.length) await env.DB.batch(stmts); const ev=stmts.length?await registerEvidence(env,projectId,{kind:'RAW_OBSERVATION',source:'manual_api',detail:{inserted:stmts.length}}):null; return json({inserted:stmts.length,revalidation:ev});
     }
     if(parts[3]==='reviewer-observations' && method==='POST'){
-      const b=await bodyJson(request); const id=uid('review');
+      const b=await bodyJson(request);if(b.trial_id){try{const saved=await recordHumanTrial(env,projectId,b);const ev=await registerEvidence(env,projectId,{kind:'HUMAN_TRIAL',source:'calibrated_task_v2',detail:{observation_id:saved.id}});return json({...saved,revalidation:ev},201);}catch(e){return json({error:e.message},400);}} const id=uid('review');
       await env.DB.batch([   // 관측 INSERT + 프로젝트 카운터 증가를 한 batch(원자적)로
         env.DB.prepare(`INSERT INTO reviewer_observations(id,project_id,participant_hash,ai_confidence,ai_correct,human_accept,response_ms,recovered,recovery_ms,context_json,created_at) VALUES(?,?,?,?,?,?,?,?,?,?,?)`).bind(id,projectId,String(b.participant_hash||'anon'),Number(b.ai_confidence),b.ai_correct?1:0,b.human_accept?1:0,Number(b.response_ms||0),b.recovered?1:0,b.recovery_ms==null?null:Number(b.recovery_ms),JSON.stringify(b.context||{}),nowIso()),
         env.DB.prepare(`UPDATE projects SET reviewer_obs_count=reviewer_obs_count+1 WHERE id=?`).bind(projectId)

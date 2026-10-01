@@ -30,7 +30,7 @@ export async function defineProject(env, projectId){
   };
   const pass=Object.values(gate).filter(Boolean).length;
   const status=pass===Object.keys(gate).length?'CONFIRM':pass>=5?'REVISE':'HOLD';
-  const content={research_question:rq,design,constraints,benchmark:safeJson(p.benchmark_json,{}),validation,empirical_calibration:{status:empirical.status,target_rows:empirical.target_rows,complete_rows:empirical.complete_rows,profile_version:empirical.profile?.version,profile_name:empirical.profile?.name}};
+  const content={research_question:rq,design,constraints,benchmark:{confidence_method:'residual_common_v1',...safeJson(p.benchmark_json,{})},validation,empirical_calibration:{status:empirical.status,target_rows:empirical.target_rows,complete_rows:empirical.complete_rows,profile_version:empirical.profile?.version,profile_name:empirical.profile?.name}};
   const ai=await aiJson(env,
     'You are a neutral research design auditor. Check operational definitions, falsifiability, measurement validity, and hidden assumptions.',
     JSON.stringify({content,gate}),

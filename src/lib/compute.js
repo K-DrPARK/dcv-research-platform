@@ -93,7 +93,9 @@ function estimatorStep(kind,state,y,alpha,sigma){
   const prev=state.x??y, x=a*y+(1-a)*prev;
   return {...state,x,var:.9*(state.var??1)+.1*(y-x)*(y-x),change:false};
 }
-function confidenceFor(estState,estimate,threshold,sigma){
+function confidenceFor(estState,estimate,threshold,sigma,method='residual_common_v1'){
+  if(method==='residual_common_v1'){const variance=Math.max(sigma*sigma,estState.predictionVariance??sigma*sigma,EPS);return clamp(.5+.5*(1-Math.exp(-Math.abs(estimate-threshold)/Math.sqrt(variance))),.5,.999);}
+
   const distance=Math.abs(estimate-threshold);
   const uncertainty=Math.sqrt(Math.max(EPS,estState.p??estState.var??sigma*sigma));
   return clamp(.5+.5*(1-Math.exp(-distance/(uncertainty+.12))),.5,.999);
@@ -104,14 +106,15 @@ function reviewerDecision(rng,aiStop,shouldStop,confidence,reviewer,delayBase,de
   const unnecessaryOverride=Number(reviewer?.unnecessary_override_rate??Math.min(.18,falseAccept*.5));
   let finalStop=aiStop;
   if(aiStop!==shouldStop){ if(rng()<correctOverride) finalStop=shouldStop; }
-  else if(rng()<unnecessaryOverride*(1-confidence)) finalStop=!aiStop;
-  const base=Number(reviewer?.mean_delay??delayBase);
-  return {finalStop,delay:Math.max(.05,base*delayMult*(.85+.3*rng())),falseAccept,correctOverride};
+  else if(rng()<unnecessaryOverride) finalStop=!aiStop;
+  const base=Math.max(0,Number(delayBase||0))+Math.max(0,Number(reviewer?.mean_delay||0))/86400;
+  return {finalStop,delay:Math.max(0,base*delayMult*(.85+.3*rng())),falseAccept,correctOverride};
 }
-function simulateEpisode(c,constraints,rng,scenario,reviewer,config){
+function simulateEpisode(c,constraints,rng,scenario,reviewer,config,reviewRng=mulberry32(20261002)){
   const horizon=Number(config.horizon||24), tau=Math.max(0,Math.round(c.tau||0));
   const threshold=Number(scenario.risk_threshold_override??config.risk_threshold??.68), latentThreshold=Math.log(threshold/(1-threshold));
-  const history=[], est={x:0,p:1,var:1,change:false};
+  const history=[], est={x:0,p:1,var:Math.max(c.sigma*c.sigma,scenario.process_noise**2),predictionVariance:Math.max(c.sigma*c.sigma,scenario.process_noise**2),change:false};
+  const confidenceBins=Array.from({length:10},()=>({n:0,sum:0,correct:0}));
   let state=randn(rng)*.25, reviewN=0, rtSum=0, fp=0,fn=0, decisions=0, totalLoss=0, adjustmentN=0;
   let rollingErrors=0, safeMode=0;
   for(let t=0;t<horizon;t++){
@@ -121,19 +124,25 @@ function simulateEpisode(c,constraints,rng,scenario,reviewer,config){
     const obs=state+randn(rng)*c.sigma*scenario.volatility;
     history.push(obs);
     const delayed=history[Math.max(0,history.length-1-tau)];
+    // Identical one-step predictive residual semantics for every estimator; no latent labels.
+    const residual=delayed-est.x,previousVariance=est.predictionVariance;
     const es=estimatorStep(c.estimator||'ema',est,delayed,c.alpha,c.sigma);
     Object.assign(est,es);
-    const estimate=est.x, confidence=confidenceFor(est,estimate,latentThreshold,c.sigma);
+    const estimate=est.x;let confidence=confidenceFor(est,estimate,latentThreshold,c.sigma,config.confidence_method||'residual_common_v1');
+    est.predictionVariance=.9*previousVariance+.1*residual*residual;
     const shouldStop=logistic(state)>threshold;
     const aiStop=estimate>latentThreshold;
+    // Only pure offline audit callers can request perfect-label foresight; configFrom never enables it.
+    if(config.audit_perfect_label===true)confidence=aiStop===shouldStop?1:0;
+    const bin=confidenceBins[Math.min(9,Math.floor(confidence*10))];bin.n++;bin.sum+=confidence;bin.correct+=aiStop===shouldStop?1:0;
     const K=Number(c.authority_k);
     let needsReview=K===0 || K===1 || safeMode>0;
     if(K===2) needsReview=needsReview || confidence<Number(config.k2_confidence||.84);
     if(K>=3) needsReview=needsReview || confidence<Number(config.k3_confidence||.67);
-    let finalStop=aiStop, decisionDelay=Math.max(.02,c.delay_d*.12*scenario.delay_multiplier);
+    let finalStop=aiStop, decisionDelay=Number(config.autonomous_delay_days??.02);
     if(needsReview){
       reviewN++;
-      const hr=reviewerDecision(rng,aiStop,shouldStop,confidence,reviewer,c.delay_d,scenario.delay_multiplier);
+      const hr=reviewerDecision(reviewRng,aiStop,shouldStop,confidence,reviewer,c.delay_d,scenario.delay_multiplier);
       finalStop=hr.finalStop; decisionDelay=hr.delay;
     }
     if(finalStop&&!shouldStop) fp++;
@@ -162,10 +171,11 @@ function simulateEpisode(c,constraints,rng,scenario,reviewer,config){
   const recoveryTime=rtSum/Math.max(1,decisions), burden=reviewN/Math.max(1,decisions), norm=Math.max(EPS,Number(config.empirical?.loss?.normalization??constraints.loss_max??1));
   // 목적함수는 임의 가중치를 제거하고 각 항을 경험적 손실 스케일과 T로 무차원화한다.
   const objective=episodeLoss/norm + burden + recoveryTime/Math.max(1,horizon) + adjustmentN/Math.max(1,horizon);
-  return {episodeLoss,lossExceeded:episodeLoss>constraints.loss_max,fp,fn,decisions,reviewN,recoveryTime,adjustmentN,objective};
+  return {episodeLoss,lossExceeded:episodeLoss>constraints.loss_max,fp,fn,decisions,reviewN,recoveryTime,adjustmentN,objective,confidenceBins};
 }
-function emptyAgg(){ return {episodes:0,lossExceed:0,fp:0,fn:0,decisions:0,reviewN:0,rtSum:0,rtSq:0,lossSum:0,lossSq:0,objSum:0,objSq:0,adjustments:0,scenarios:{},groups:{}}; }
+function emptyAgg(){ return {episodes:0,lossExceed:0,fp:0,fn:0,decisions:0,reviewN:0,rtSum:0,rtSq:0,lossSum:0,lossSq:0,objSum:0,objSq:0,adjustments:0,confidenceBins:Array.from({length:10},()=>({n:0,sum:0,correct:0})),scenarios:{},groups:{}}; }
 function addEpisodeStats(a,e,key){
+  for(let i=0;i<10;i++)for(const k of ['n','sum','correct'])a.confidenceBins[i][k]+=Number(e.confidenceBins?.[i]?.[k]||0);
   a.episodes++; a.lossExceed+=e.lossExceeded?1:0; a.fp+=e.fp; a.fn+=e.fn; a.decisions+=e.decisions; a.reviewN+=e.reviewN;
   a.rtSum+=e.recoveryTime; a.rtSq+=e.recoveryTime*e.recoveryTime; a.lossSum+=e.episodeLoss; a.lossSq+=e.episodeLoss*e.episodeLoss; a.objSum+=e.objective; a.objSq+=e.objective*e.objective; a.adjustments+=e.adjustmentN;
   const s=a.scenarios[key]??={n:0,objSum:0,lossSum:0,violations:0}; s.n++; s.objSum+=e.objective; s.lossSum+=e.episodeLoss; s.violations+=e.lossExceeded?1:0;
@@ -175,6 +185,7 @@ function addEpisode(a,e,key,group=null){
   if(group){const g=a.groups[group]??=emptyAgg();addEpisodeStats(g,e,key);}
 }
 function mergeAgg(target,src){
+  for(let i=0;i<10;i++)for(const k of ['n','sum','correct'])target.confidenceBins[i][k]+=Number(src.confidenceBins?.[i]?.[k]||0);
   for(const k of ['episodes','lossExceed','fp','fn','decisions','reviewN','rtSum','rtSq','lossSum','lossSq','objSum','objSq','adjustments']) target[k]+=Number(src[k]||0);
   for(const [k,v] of Object.entries(src.scenarios||{})){ const s=target.scenarios[k]??={n:0,objSum:0,lossSum:0,violations:0}; for(const f of ['n','objSum','lossSum','violations']) s[f]+=Number(v[f]||0); }
   for(const [k,v] of Object.entries(src.groups||{})){const g=target.groups[k]??=emptyAgg();mergeAgg(g,v);}
@@ -182,7 +193,7 @@ function mergeAgg(target,src){
 }
 function finalizeAgg(a,constraints,confidence=.95,inference={},includeGroups=true){
   const nominalZ=confidence>=.99?2.576:confidence>=.95?1.96:1.645;
-  const method=inference.method||'none',familySize=Math.max(1,Number(inference.familySize||1)),constraintCount=Object.keys(PROB_CONSTRAINTS).length+Object.keys(MEAN_CONSTRAINTS).length;
+  const method=inference.method||'none',familySize=Math.max(1,Number(inference.familySize||1)),constraintCount=Object.keys(PROB_CONSTRAINTS).length+Object.keys(MEAN_CONSTRAINTS).length+(Number.isFinite(constraints.loss_mean_max)?1:0);
   const alpha=1-confidence,tests=Math.max(1,familySize*constraintCount),adjust=method==='bonferroni'&&inference.adjust===true;
   const z=adjust?normInv(1-alpha/(2*tests)):nominalZ;
   const nE=Math.max(1,a.episodes), nD=Math.max(1,a.decisions);
@@ -194,8 +205,9 @@ function finalizeAgg(a,constraints,confidence=.95,inference={},includeGroups=tru
   const lossSd=sampleSd(a.lossSum,a.lossSq,a.episodes), rtSd=sampleSd(a.rtSum,a.rtSq,a.episodes);
   const burdenCI=wilson(a.reviewN,a.decisions,z), lossCI=wilson(a.lossExceed,a.episodes,z), fpCI=wilson(a.fp,a.decisions,z), fnCI=wilson(a.fn,a.decisions,z);
   const rtCI=normalCI(metrics.recovery_time,rtSd,a.episodes,z);
-  const ci={loss_exceed_rate:lossCI,fp_rate:fpCI,fn_rate:fnCI,review_burden:burdenCI,recovery_time:rtCI};
+  const ci={loss_mean:normalCI(metrics.loss_mean,lossSd,a.episodes,z),loss_exceed_rate:lossCI,fp_rate:fpCI,fn_rate:fnCI,review_burden:burdenCI,recovery_time:rtCI};
   const evals=[];
+  if(Number.isFinite(constraints.loss_mean_max))evals.push({metric:'loss_mean',limit:constraints.loss_mean_max,...ci.loss_mean,mean:metrics.loss_mean});
   for(const [metric,limitKey] of Object.entries(PROB_CONSTRAINTS)){ const q=ci[metric], lim=Number(constraints[limitKey]); evals.push({metric,limit:lim,lo:q.lo,hi:q.hi,mean:metrics[metric]}); }
   for(const [metric,limitKey] of Object.entries(MEAN_CONSTRAINTS)){ const q=ci[metric], lim=Number(constraints[limitKey]); evals.push({metric,limit:lim,lo:q.lo,hi:q.hi,mean:metrics[metric]}); }
   const anyFail=evals.some(x=>x.lo>x.limit), allPass=evals.every(x=>x.hi<=x.limit);
@@ -205,12 +217,24 @@ function finalizeAgg(a,constraints,confidence=.95,inference={},includeGroups=tru
   const scenario_scores=Object.fromEntries(Object.entries(a.scenarios).map(([k,v])=>[k,{n:v.n,objective:v.objSum/Math.max(1,v.n),loss_mean:v.lossSum/Math.max(1,v.n),loss_exceed_rate:v.violations/Math.max(1,v.n)}]));
   const validation_groups={};
   if(includeGroups)for(const [k,g] of Object.entries(a.groups||{}))validation_groups[k]=finalizeAgg(g,constraints,confidence,inference,false);
-  return {metrics,ci,classification,boundary_score:boundaryScore,constraints:evals,scenario_scores,validation_groups,inference:{method:adjust?'bonferroni':'nominal',nominal_confidence:confidence,family_size:familySize,constraint_count:constraintCount,simultaneous_tests:adjust?tests:constraintCount,z_critical:z},raw:a};
+  const confidence_bins=(a.confidenceBins||[]).filter(b=>b.n).map(b=>({n:b.n,confidence:b.sum/b.n,accuracy:b.correct/b.n}));
+  const calibration_ece=confidence_bins.reduce((s,b)=>s+b.n*Math.abs(b.confidence-b.accuracy),0)/nD;
+  return {metrics,ci,confidence_audit:{bins:confidence_bins,ece:calibration_ece,scope:'diagnostic, not a calibration certificate'},classification,boundary_score:boundaryScore,constraints:evals,scenario_scores,validation_groups,inference:{method:adjust?'bonferroni':'nominal',nominal_confidence:confidence,family_size:familySize,constraint_count:constraintCount,simultaneous_tests:adjust?tests:constraintCount,z_critical:z},raw:a};
 }
 function deterministicSeed(projectId,candidateId,phase,cycle){ return hashString(`${projectId}|${candidateId}|${phase}|${cycle}|DCV-CDRS-v2`)&0x7fffffff; }
+function applyNoninferiority(ev,candidate,baseline,margins){
+ const comparisons=[['loss_mean',Number(margins.loss_relative_margin),true],['fn_rate',Number(margins.fn_absolute_margin),false],['fp_rate',Number(margins.fp_absolute_margin),false]].map(([metric,margin,relative])=>{
+  const a=candidate.ci[metric],b=baseline.ci[metric],factor=relative?1+margin:1,limit=relative?0:margin;
+  return {metric:'noninferiority_'+metric,limit,mean:candidate.metrics[metric]-factor*baseline.metrics[metric],lo:a.lo-factor*b.hi,hi:a.hi-factor*b.lo};
+ });
+ ev.noninferiority={baseline:'matched full-review K0; same estimator, delays, scenario and environment seed',margins,baseline_metrics:baseline.metrics,comparisons,scope:'Conservative simultaneous CI contrasts for the current independent batch; no post-hoc threshold selection'};
+ ev.constraints.push(...comparisons);
+ ev.classification=ev.constraints.some(x=>x.lo>x.limit)?'INFEASIBLE':ev.constraints.every(x=>x.hi<=x.limit)?'FEASIBLE':'UNRESOLVED';
+ return ev;
+}
 function configFrom(def,env,cal){
   const b=def.content.benchmark||{}, v=def.content.validation||{};
-  return {horizon:Number(b.horizon||cal.params.horizon_days?.value||90),risk_threshold:Number(b.risk_threshold||cal.params.stability_theta_korea?.value||.62),recovery_alpha:Number(b.recovery_alpha??.18),k2_confidence:Number(b.k2_confidence||.84),k3_confidence:Number(b.k3_confidence||.67),max_refinement:Number(v.max_refinement||3),max_confirmation:Number(v.max_confirmation||2),confidence:Number(def.content.constraints?.confidence||.95),familywise_confidence:Number(v.familywise_confidence||def.content.constraints?.confidence||.95),multiplicity_method:v.multiplicity_method||'bonferroni',family_size:Number(def.content.design?.max_candidates||128),exploration_n:Number(v.exploration_n||env.SIM_BATCH_SIZE||180),refinement_n:Number(v.refinement_n||env.SIM_BATCH_SIZE||240),confirmation_n:Number(v.confirmation_n||Math.max(300,Number(env.SIM_BATCH_SIZE||180))),robust_n:Number(v.robust_n||Math.max(300,Number(env.SIM_BATCH_SIZE||180))),empirical:cal};
+  return {confidence_method:b.confidence_method||'residual_common_v1',autonomous_delay_days:Number(b.autonomous_delay_days??.02),noninferiority:b.noninferiority||null,horizon:Number(b.horizon||cal.params.horizon_days?.value||90),risk_threshold:Number(b.risk_threshold||cal.params.stability_theta_korea?.value||.62),recovery_alpha:Number(b.recovery_alpha??.18),k2_confidence:Number(b.k2_confidence||.84),k3_confidence:Number(b.k3_confidence||.67),max_refinement:Number(v.max_refinement||3),max_confirmation:Number(v.max_confirmation||2),confidence:Number(def.content.constraints?.confidence||.95),familywise_confidence:Number(v.familywise_confidence||def.content.constraints?.confidence||.95),multiplicity_method:v.multiplicity_method||'bonferroni',family_size:Number(def.content.design?.max_candidates||128),exploration_n:Number(v.exploration_n||env.SIM_BATCH_SIZE||180),refinement_n:Number(v.refinement_n||env.SIM_BATCH_SIZE||240),confirmation_n:Number(v.confirmation_n||Math.max(300,Number(env.SIM_BATCH_SIZE||180))),robust_n:Number(v.robust_n||Math.max(300,Number(env.SIM_BATCH_SIZE||180))),empirical:cal};
 }
 function designDims(d){
   const dims=['sigma','tau','alpha','K','d','W','m'].map(k=>({k,vals:(d[k]&&d[k].length?d[k]:[0]).map(Number)}));
@@ -253,15 +277,17 @@ export async function seedCandidates(env,projectId){
   const mr=await one(env.DB,`SELECT metrics_json FROM measurements WHERE project_id=? ORDER BY measured_at DESC LIMIT 1`,[projectId]);
   const mm=safeJson(mr?.metrics_json,{}),op=mm.operational||{},observedSigma=Number(mm?.pooled?.empirical_sigma);
   const robustGrid=(v,min=0,max=999,integer=false)=>{const a=[.6,1,1.4].map(m=>clamp(v*m,min,max)).map(x=>integer?Math.round(x):Number(x.toFixed(4)));return [...new Set(a)];};
-  if(Number.isFinite(observedSigma)&&observedSigma>0&&Number(mm.numeric_observations||0)>=30)d.sigma=robustGrid(observedSigma,.005,.50,false);
-  if(Number.isFinite(Number(op.data_latency_days)))d.tau=robustGrid(Number(op.data_latency_days),0,30,true);
-  if(Number.isFinite(Number(op.approval_delay_days)))d.d=robustGrid(Number(op.approval_delay_days),0,30,false);
-  const combos=sampleDesign(d,Number(d.max_candidates||128),hashString(`${projectId}:design`)); const now=nowIso(); const candIds=combos.map(()=>uid('cand'));
-  const stmts=combos.map((x,i)=>env.DB.prepare(`INSERT INTO design_candidates(id,project_id,sigma,tau,alpha,authority_k,delay_d,recovery_w,adjust_m,status,estimator,evidence_status,created_at,updated_at,research_cycle) VALUES(?,?,?,?,?,?,?,?,?,'pending',?,'pending',?,?,?)`).bind(candIds[i],projectId,x.sigma,x.tau,x.alpha,x.K,x.d,x.W,x.m,x.estimator,now,now,cycle));
-  if(stmts.length)await env.DB.batch([...stmts,env.DB.prepare(`UPDATE projects SET candidate_count=? WHERE id=?`).bind(stmts.length,projectId)]);   // 목록 화면의 후보 수 카운터(0008)
+  if(d.grid_source==='operational'&&Number.isFinite(observedSigma)&&observedSigma>0&&Number(mm.numeric_observations||0)>=30)d.sigma=robustGrid(observedSigma,.005,.50,false);
+  if(d.grid_source==='operational'&&op.data_latency_days!=null&&Number.isFinite(Number(op.data_latency_days)))d.tau=robustGrid(Number(op.data_latency_days),0,30,true);
+  if(d.grid_source==='operational'&&op.approval_delay_days!=null&&Number.isFinite(Number(op.approval_delay_days)))d.d=robustGrid(Number(op.approval_delay_days),0,30,false);
+  const combos=Array.isArray(d.candidate_rows)?d.candidate_rows:sampleDesign(d,Number(d.max_candidates||128),hashString(`${projectId}:design`)); const now=nowIso(); const candIds=combos.map(()=>uid('cand'));
+  const rows=combos.map((x,i)=>({...x,id:candIds[i]}));
+  const stmts=[env.DB.prepare(`INSERT INTO design_candidates(id,project_id,sigma,tau,alpha,authority_k,delay_d,recovery_w,adjust_m,status,estimator,evidence_status,created_at,updated_at,research_cycle,base_id,candidate_role,pair_seed_key)
+   SELECT json_extract(value,'$.id'),?,json_extract(value,'$.sigma'),json_extract(value,'$.tau'),json_extract(value,'$.alpha'),json_extract(value,'$.K'),json_extract(value,'$.d'),json_extract(value,'$.W'),json_extract(value,'$.m'),'pending',json_extract(value,'$.estimator'),'pending',?,?,?,json_extract(value,'$.base_id'),COALESCE(json_extract(value,'$.role'),'exploratory'),json_extract(value,'$.base_id') FROM json_each(?)`).bind(projectId,now,now,cycle,JSON.stringify(rows))];
+  if(rows.length)await env.DB.batch([...stmts,env.DB.prepare('UPDATE projects SET candidate_count=? WHERE id=?').bind(rows.length,projectId)]);
   await ensureFrozenProtocol(env,projectId);
   await enqueueMany(env,projectId,'compute_candidate',candIds.map(id=>({candidate_id:id,phase:'exploration',cycle:0})),40);
-  await audit(env,projectId,'agent','cdrs.seed','project',projectId,{created:stmts.length,method:'maximin',estimators:d.estimators||ESTIMATORS,empirical_grid:{sigma:d.sigma,tau:d.tau,d:d.d},source:{sigma:Number.isFinite(observedSigma)&&Number(mm.numeric_observations||0)>=30?'external_observations':'paper/default',tau:Number.isFinite(Number(op.data_latency_days))?'operational_logs':'design',approval_delay:Number.isFinite(Number(op.approval_delay_days))?'operational_logs':'design'}}); return{created:stmts.length};
+  await audit(env,projectId,'agent','cdrs.seed','project',projectId,{created:rows.length,method:Array.isArray(d.candidate_rows)?'preregistered_paired_csv':'maximin',estimators:d.estimators||ESTIMATORS,empirical_grid:{sigma:d.sigma,tau:d.tau,d:d.d},source:{sigma:Number.isFinite(observedSigma)&&Number(mm.numeric_observations||0)>=30?'external_observations':'paper/default',tau:d.grid_source==='operational'&&op.data_latency_days!=null&&Number.isFinite(Number(op.data_latency_days))?'operational_logs':'declared_design',approval_delay:d.grid_source==='operational'&&op.approval_delay_days!=null&&Number.isFinite(Number(op.approval_delay_days))?'operational_logs':'declared_design'}}); return{created:rows.length};
 }
 async function loadScenarios(env,projectId,phase,cal){
   if(phase==='historical'){
@@ -292,12 +318,14 @@ export async function computeCandidate(env,projectId,candidateId,phase='explorat
   await assertProtocolIntegrity(env,projectId,{cycle:projectCycle});
   const def=await latestDefinition(env,projectId);if(!def)throw new Error('definition_missing');const constraints=def.content.constraints,cal=await loadEmpiricalCalibration(env,projectId),config=configFrom(def,env,cal);
   let reviewer=null;if(phase==='recompute'){const key=`reviewer:latest:${projectCycle}:${projectRev}`;const rm=await cached(env,projectId,key,()=>one(env.DB,`SELECT model_json FROM reviewer_models WHERE project_id=? AND research_cycle=? AND evidence_revision=? ORDER BY version DESC LIMIT 1`,[projectId,projectCycle,projectRev]));reviewer=rm?safeJson(rm.model_json,{}):null;}
-  const scenarioPack=await loadScenarios(env,projectId,phase==='recompute'?'confirmation':phase,cal),scenarios=scenarioPack.scenarios; const seed=deterministicSeed(projectId,candidateId,phase,cycle),rng=mulberry32(seed),n=nForPhase(config,phase);
-  const batch=emptyAgg(); for(let i=0;i<n;i++){const sc=scenarios[i%scenarios.length];addEpisode(batch,simulateEpisode(c,constraints,rng,sc,reviewer,config),sc.key,sc.validation_group||null);}
+  const scenarioPack=await loadScenarios(env,projectId,phase==='recompute'?'confirmation':phase,cal),scenarios=scenarioPack.scenarios; const seed=deterministicSeed(projectId,c.pair_seed_key||candidateId,phase,cycle),rng=mulberry32(seed),n=nForPhase(config,phase);
+  const batch=emptyAgg(),baseline=emptyAgg();for(let i=0;i<n;i++){const sc=scenarios[i%scenarios.length],episodeSeed=hashString(seed+'|'+i);addEpisode(batch,simulateEpisode(c,constraints,mulberry32(episodeSeed),sc,reviewer,config,mulberry32(episodeSeed^0x5a5a)),sc.key,sc.validation_group||null);if(config.noninferiority)addEpisode(baseline,simulateEpisode({...c,authority_k:0},constraints,mulberry32(episodeSeed),sc,reviewer,config,mulberry32(episodeSeed^0x5a5a)),sc.key,sc.validation_group||null);}
   let combined=batch; if(['refinement','confirmation'].includes(phase)){const prior=await priorAggregate(env,candidateId,phase);combined=mergeAgg(prior,batch);}
   const confirmatory=['confirmation','historical','stress','recompute'].includes(phase);
-  const ev=finalizeAgg(combined,constraints,confirmatory?config.familywise_confidence:config.confidence,{method:config.multiplicity_method,familySize:config.family_size,adjust:confirmatory}); const m=ev.metrics,id=uid('sim');
-  await run(env.DB,`INSERT INTO simulation_runs(id,project_id,candidate_id,phase,seed,n,loss_mean,loss_exceed_rate,fp_rate,fn_rate,review_burden,recovery_time,regret,result_json,created_at,evidence_revision) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,[id,projectId,candidateId,phase,seed,n,m.loss_mean,m.loss_exceed_rate,m.fp_rate,m.fn_rate,m.review_burden,m.recovery_time,null,JSON.stringify({...ev,raw:batch,cycle,estimator:c.estimator,reviewer_used:!!reviewer,scenario_source:scenarioPack.source,empirical_ready:scenarioPack.empirical_ready,empirical_episode_n:scenarioPack.episode_n,empirical_profile:cal.profile.version}),nowIso(),projectRev]);
+  const ev=finalizeAgg(combined,constraints,confirmatory?config.familywise_confidence:config.confidence,{method:config.multiplicity_method,familySize:config.family_size*(config.noninferiority?2:1),adjust:confirmatory});
+  if(config.noninferiority){const base=finalizeAgg(baseline,constraints,config.familywise_confidence,{method:'bonferroni',familySize:config.family_size*2,adjust:true});applyNoninferiority(ev,finalizeAgg(batch,constraints,config.familywise_confidence,{method:'bonferroni',familySize:config.family_size*2,adjust:true}),base,config.noninferiority);}
+  const m=ev.metrics,id=uid('sim');
+  await run(env.DB,`INSERT INTO simulation_runs(id,project_id,candidate_id,phase,seed,n,loss_mean,loss_exceed_rate,fp_rate,fn_rate,review_burden,recovery_time,regret,result_json,created_at,evidence_revision) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,[id,projectId,candidateId,phase,seed,n,m.loss_mean,m.loss_exceed_rate,m.fp_rate,m.fn_rate,m.review_burden,m.recovery_time,null,JSON.stringify({...ev,raw:batch,cycle,engine_version:'DCV-CDRS-v3',confidence_method:config.confidence_method,candidate_role:c.candidate_role,reviewer_source:reviewer?'current_revision_human_model':'design_priors_unvalidated',estimator:c.estimator,reviewer_used:!!reviewer,scenario_source:scenarioPack.source,empirical_ready:scenarioPack.empirical_ready,empirical_episode_n:scenarioPack.episode_n,empirical_profile:cal.profile.version}),nowIso(),projectRev]);
   await run(env.DB,`INSERT INTO candidate_evidence(id,project_id,candidate_id,phase,cycle,classification,boundary_score,metrics_json,created_at) VALUES(?,?,?,?,?,?,?,?,?)`,[uid('evidence'),projectId,candidateId,phase,cycle,ev.classification,ev.boundary_score,JSON.stringify(ev),nowIso()]);
   if(['exploration','refinement'].includes(phase)){
     let status=ev.classification==='FEASIBLE'?'provisionally_feasible':ev.classification==='INFEASIBLE'?'infeasible':'unresolved';
@@ -337,13 +365,17 @@ export async function computeRegretTable(env,projectId,preloadedRuns=null){
   const runs=preloadedRuns||await all(env.DB,`SELECT candidate_id,phase,result_json FROM simulation_runs WHERE project_id=? AND phase IN ('historical','stress') ORDER BY created_at DESC`,[projectId]);
   const latestBy=new Map(); for(const r of runs){ if(!confirmedIds.has(r.candidate_id)||(r.phase!=='historical'&&r.phase!=='stress'))continue; let m=latestBy.get(r.candidate_id); if(!m){m={};latestBy.set(r.candidate_id,m);} if(!m[r.phase])m[r.phase]=safeJson(r.result_json,{}); }
   const rows=cands.map(c=>({id:c.id,latest:latestBy.get(c.id)||{}}));
-  const best={}; for(const row of rows)for(const ph of ['historical','stress'])for(const [s,v] of Object.entries(row.latest[ph]?.scenario_scores||{}))best[`${ph}:${s}`]=Math.min(best[`${ph}:${s}`]??Infinity,Number(v.objective));
-  const result=[],writes=[],ts=nowIso(); for(const row of rows){let maxRegret=0,meanRegs=[];for(const ph of ['historical','stress'])for(const [s,v] of Object.entries(row.latest[ph]?.scenario_scores||{})){const key=`${ph}:${s}`,reg=Math.max(0,Number(v.objective)-Number(best[key]));maxRegret=Math.max(maxRegret,reg);meanRegs.push(reg);}const avgRegret=mean(meanRegs);
-    writes.push(env.DB.prepare(`UPDATE design_candidates SET max_regret=?,updated_at=? WHERE id=?`).bind(maxRegret,ts,row.id),env.DB.prepare(`UPDATE simulation_runs SET regret=? WHERE candidate_id=? AND phase IN ('historical','stress')`).bind(maxRegret,row.id));
-    result.push({candidate_id:row.id,max_regret:maxRegret,mean_regret:avgRegret});}
-  for(let i=0;i<writes.length;i+=50)await env.DB.batch(writes.slice(i,i+50));
-  return result.sort((a,b)=>a.max_regret-b.max_regret);
+  const complete=rows.filter(r=>['historical','stress'].every(ph=>Object.keys(r.latest[ph]?.scenario_scores||{}).length));
+  const keys=new Set(complete.flatMap(r=>['historical','stress'].flatMap(ph=>Object.keys(r.latest[ph].scenario_scores).map(k=>ph+':'+k))));
+  const eligible=complete.filter(r=>['historical','stress'].reduce((n,ph)=>n+Object.keys(r.latest[ph].scenario_scores).length,0)===keys.size);
+  const best={};for(const row of eligible)for(const ph of ['historical','stress'])for(const [key,v] of Object.entries(row.latest[ph].scenario_scores))best[ph+':'+key]=Math.min(best[ph+':'+key]??Infinity,Number(v.objective));
+  const ids=new Set(eligible.map(r=>r.id)),result=rows.map(row=>{if(!ids.has(row.id))return {candidate_id:row.id,max_regret:null,mean_regret:null,status:'MISSING_SCENARIO_COVERAGE'};const values=['historical','stress'].flatMap(ph=>Object.entries(row.latest[ph].scenario_scores).map(([key,v])=>Math.max(0,Number(v.objective)-best[ph+':'+key])));return {candidate_id:row.id,max_regret:Math.max(...values),mean_regret:mean(values),status:'COMPUTED'};});
+  if(result.length){const payload=JSON.stringify(result),ts=nowIso();await env.DB.batch([
+   env.DB.prepare(`UPDATE design_candidates SET max_regret=(SELECT json_extract(value,'$.max_regret') FROM json_each(?) WHERE json_extract(value,'$.candidate_id')=design_candidates.id),updated_at=? WHERE id IN (SELECT json_extract(value,'$.candidate_id') FROM json_each(?))`).bind(payload,ts,payload),
+   env.DB.prepare(`UPDATE simulation_runs SET regret=(SELECT json_extract(value,'$.max_regret') FROM json_each(?) WHERE json_extract(value,'$.candidate_id')=simulation_runs.candidate_id) WHERE candidate_id IN (SELECT json_extract(value,'$.candidate_id') FROM json_each(?)) AND phase IN ('historical','stress')`).bind(payload,payload)
+  ]);}
+  return result.sort((a,b)=>(a.max_regret??Infinity)-(b.max_regret??Infinity));
 }
 
 // Pure helpers exposed only for deterministic unit tests; production orchestration uses the exported CDRS functions above.
-export const __test = { finalizeAgg, emptyAgg, mergeAgg, estimatorStep, empiricalChannel, calibrationUncertaintyScenarios, lossProxyScenarios };
+export const __test = { simulateEpisode,confidenceFor,configFrom,applyNoninferiority,finalizeAgg, emptyAgg, mergeAgg, estimatorStep, empiricalChannel, calibrationUncertaintyScenarios, lossProxyScenarios };

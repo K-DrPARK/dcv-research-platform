@@ -12,7 +12,7 @@ export async function buildProtocol(env,projectId){
   const candidates=await all(env.DB,`SELECT sigma,tau,alpha,authority_k,delay_d,recovery_w,adjust_m,estimator FROM design_candidates WHERE project_id=? AND research_cycle=? ORDER BY sigma,tau,alpha,authority_k,delay_d,recovery_w,adjust_m,estimator`,[projectId,cycle]);
   const actualPlan=candidates.map(c=>[Number(c.sigma),Number(c.tau),Number(c.alpha),Number(c.authority_k),Number(c.delay_d),Number(c.recovery_w),Number(c.adjust_m),String(c.estimator)]);
   return {
-    schema:'DCV-PROTOCOL-1.1', project_id:projectId, research_cycle:cycle, definition_version:def.version,
+    schema:'DCV-PROTOCOL-1.2',engine_version:'DCV-CDRS-v3',confidence_method:def.content.benchmark?.confidence_method||'residual_common_v1',noninferiority:def.content.benchmark?.noninferiority||null,human_protocol:validation.human_protocol||'legacy' , project_id:projectId, research_cycle:cycle, definition_version:def.version,
     research_question:def.content.research_question,
     design_space:design,
     actual_candidate_plan:{count:actualPlan.length,tuples:actualPlan},

@@ -11,6 +11,7 @@ import { scientificSignoff } from './lib/approve.js';
 import { latestProtocol } from './lib/rigor.js';
 import { registerEvidence, approvalGates } from './lib/evidence.js';
 import { SOURCE_PRESETS } from './lib/source_presets.js';
+import { resolveFdicLinks, confirmFdicLink, fdicStatus, enableFdicConnectors, buildFdicReverificationRankings, getFdicReverificationRankings } from './lib/fdic.js';
 
 async function bodyJson(request){ try{return await request.json();}catch{return {};} }
 function pathParts(url){ return new URL(url).pathname.split('/').filter(Boolean); }
@@ -61,6 +62,13 @@ async function api(request,env){
     }
     if(parts[3]==='run' && method==='POST'){ await run(env.DB,`UPDATE projects SET reviewer_hold_marker=NULL WHERE id=?`,[projectId]); const r=await advanceProject(env,projectId); return json({advance:r,transport:env.CDRS_QUEUE?'cloudflare-queue':'d1-fallback'}); }
     if(parts[3]==='sources' && method==='GET'){ return json({sources:await all(env.DB,`SELECT * FROM data_sources WHERE project_id=? ORDER BY created_at DESC`,[projectId])}); }
+    if(parts[3]==='fdic' && parts[4]==='status' && method==='GET'){ return json(await fdicStatus(env,projectId)); }
+    if(parts[3]==='fdic' && parts[4]==='enable' && method==='POST'){ const enabled=await enableFdicConnectors(env,projectId); const links=await resolveFdicLinks(env,projectId,{autoConfirm:true,maxEpisodes:81}); await enqueueOnce(env,projectId,'collect_project',{refresh:true,fdic_manual:true},20,1); return json({status:'enabled',...enabled,links}); }
+    if(parts[3]==='fdic' && parts[4]==='resolve' && method==='POST'){ const b=await bodyJson(request); return json(await resolveFdicLinks(env,projectId,{autoConfirm:b.auto_confirm!==false,maxEpisodes:Number(b.max_episodes||81)})); }
+    if(parts[3]==='fdic' && parts[4]==='link' && method==='POST'){ const b=await bodyJson(request); const r=await confirmFdicLink(env,projectId,b); return json(r,201); }
+    if(parts[3]==='fdic' && parts[4]==='collect' && method==='POST'){ await enqueueOnce(env,projectId,'collect_project',{refresh:true,fdic_manual:true},20); return json({status:'queued'}); }
+    if(parts[3]==='fdic' && parts[4]==='reverification' && method==='POST'){ return json(await buildFdicReverificationRankings(env,projectId)); }
+    if(parts[3]==='fdic' && parts[4]==='reverification' && method==='GET'){ return json(await getFdicReverificationRankings(env,projectId,{limit:Number(url.searchParams.get('limit')||81)})); }
     if(parts[3]==='sources' && method==='POST'){
       const b=await bodyJson(request), id=uid('source');
       await run(env.DB,`INSERT INTO data_sources(id,project_id,name,kind,url,method,headers_json,mapping_json,enabled,cadence_minutes,created_at) VALUES(?,?,?,?,?,?,?,?,1,?,?)`,[id,projectId,b.name||'External Source',b.kind||'json',b.url,b.method||'GET',JSON.stringify(b.headers||{}),JSON.stringify(b.mapping||{}),Number(b.cadence_minutes||60),nowIso()]);

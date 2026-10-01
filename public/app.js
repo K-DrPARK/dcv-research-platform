@@ -47,3 +47,56 @@ workflow();loadSourcePresets();load();
 function toast(msg){let t=document.getElementById('dcvToast');if(!t){t=document.createElement('div');t.id='dcvToast';t.className='dcv-toast';document.body.appendChild(t);}t.textContent=msg;t.classList.add('show');clearTimeout(t._h);t._h=setTimeout(()=>t.classList.remove('show'),2600);}
 function focusDetail(name){const el=$('#detailPanel');if(!el)return;el.classList.remove('d-none');el.scrollIntoView({behavior:'smooth',block:'start'});el.classList.remove('flash');void el.offsetWidth;el.classList.add('flash');toast(`프로젝트를 열었습니다 · ${name||''} (아래 상세 패널)`);}
 window.DCV={api,modal,esc,num,toast,token:()=>token,current:()=>current,candidates:()=>candidates};
+
+/* ── FDIC BankFind Suite SOD + Financials connector ───────────────────── */
+async function loadFdicStatus(){
+  if(!current||!document.getElementById('fdicStatus'))return;
+  try{
+    const r=await api(`/api/projects/${current}/fdic/status`),l=r.links||{},f=r.financials||{},s=r.sod||{},m=r.market_metrics||{};
+    const badge=document.getElementById('fdicBadge');
+    badge.textContent=l.confirmed?`${l.confirmed} CERT LINKED`:(l.pending?`${l.pending} PENDING`:'NOT LINKED');
+    badge.className=`status-pill ${l.confirmed?'ok':l.pending?'hold':'neutral'}`;
+    const lines=[
+      `CERT links  confirmed ${num(l.confirmed)} · pending ${num(l.pending)} · total ${num(l.total)}`,
+      `Financials rows ${num(f.rows)} · episodes ${num(f.episodes)}${f.first_date?` · ${f.first_date} → ${f.last_date}`:''}`,
+      `SOD rows ${num(s.rows)} · episodes ${num(s.episodes)}${s.first_year?` · ${s.first_year} → ${s.last_year}`:''}`,
+      `State-HHI metrics ${num(m.rows)} · episodes ${num(m.episodes)}`,
+      `Reverification ${num(r.reverification?.summary?.total)} · critical ${num(r.reverification?.summary?.critical)} · high ${num(r.reverification?.summary?.high)}`,
+      '',
+      '해석 규칙: FDIC 파생값은 검증 공변량입니다. 논문 concentration C 또는 peak_outflow를 자동 대체하지 않습니다.'
+    ];
+    document.getElementById('fdicStatus').textContent=lines.join('\n');
+    renderFdicRanking(r.reverification);
+  }catch(e){document.getElementById('fdicStatus').textContent=`FDIC 상태 조회 실패: ${e.message}`;}
+}
+
+function renderFdicRanking(r){
+  const el=document.getElementById('fdicRanking'); if(!el)return;
+  const rows=r?.rows||[]; if(!rows.length){el.innerHTML='<small class="text-secondary">FDIC 수집 후 재검증 우선순위를 산출할 수 있습니다.</small>';return;}
+  const p=x=>x==null?'-':Number(x).toFixed(3),cls=x=>String(x||'').toLowerCase();
+  el.innerHTML=`<div class="fdic-rank-head"><b>재검증 우선순위 TOP ${Math.min(8,rows.length)}</b><small>FDIC-REVERIFY-v1 · discrepancy 진단</small></div><div class="table-responsive"><table class="table table-sm fdic-rank-table"><thead><tr><th>#</th><th>Episode</th><th>자료</th><th>등급</th><th>Score</th><th>|ΔC|</th><th>|ΔDeposit|</th></tr></thead><tbody>${rows.slice(0,8).map(x=>`<tr><td>${x.rank_num??'-'}</td><td>${esc(x.episode_name)}</td><td>${esc(x.provenance_type)}</td><td><span class="rank-pill ${cls(x.priority_level)}">${esc(x.priority_level)}</span></td><td>${p(x.discrepancy_score)}</td><td>${p(x.concentration_gap)}</td><td>${p(x.deposit_gap)}</td></tr>`).join('')}</tbody></table></div><small class="text-secondary">큰 차이는 오류 확정이 아니라 원자료 재검증 신호입니다. HHI와 peak drawdown은 원 패널 변수와 정의·기간이 완전히 같지 않습니다.</small>`;
+}
+
+if(document.getElementById('fdicEnableBtn'))document.getElementById('fdicEnableBtn').onclick=async()=>{
+  if(!current)return;const b=document.getElementById('fdicEnableBtn');b.disabled=true;
+  try{const r=await api(`/api/projects/${current}/fdic/enable`,{method:'POST',body:'{}'});toast(`FDIC 활성화 · 소스 ${r.created?.length||0}개 · CERT 자동확정 ${r.links?.confirmed||0}`);await loadFdicStatus();}catch(e){alert(`FDIC 활성화 실패: ${e.message}`)}finally{b.disabled=false}
+};
+if(document.getElementById('fdicResolveBtn'))document.getElementById('fdicResolveBtn').onclick=async()=>{
+  if(!current)return;const b=document.getElementById('fdicResolveBtn');b.disabled=true;
+  try{const r=await api(`/api/projects/${current}/fdic/resolve`,{method:'POST',body:JSON.stringify({auto_confirm:true,max_episodes:81})});toast(`FDIC 매칭 · 확정 ${r.confirmed||0} · 검토대기 ${r.pending||0}`);await loadFdicStatus();}catch(e){alert(`FDIC 매칭 실패: ${e.message}`)}finally{b.disabled=false}
+};
+if(document.getElementById('fdicCollectBtn'))document.getElementById('fdicCollectBtn').onclick=async()=>{
+  if(!current)return;const b=document.getElementById('fdicCollectBtn');b.disabled=true;
+  try{await api(`/api/projects/${current}/fdic/collect`,{method:'POST',body:'{}'});toast('FDIC 수집 작업을 큐에 등록했습니다.');setTimeout(()=>loadFdicStatus(),1500);}catch(e){alert(`FDIC 수집 실패: ${e.message}`)}finally{b.disabled=false}
+};
+if(document.getElementById('fdicRankBtn'))document.getElementById('fdicRankBtn').onclick=async()=>{
+  if(!current)return;const b=document.getElementById('fdicRankBtn');b.disabled=true;
+  try{const r=await api(`/api/projects/${current}/fdic/reverification`,{method:'POST',body:'{}'});renderFdicRanking(r);toast(`재검증 우선순위 ${r.summary?.total||0}건 산출 · Critical ${r.summary?.critical||0} · High ${r.summary?.high||0}`);await loadFdicStatus();}catch(e){alert(`재검증 순위 산출 실패: ${e.message}`)}finally{b.disabled=false}
+};
+if(document.getElementById('fdicLinkBtn'))document.getElementById('fdicLinkBtn').onclick=async()=>{
+  if(!current)return;const episode_name=document.getElementById('fdicEpisodeName').value.trim(),cert=Number(document.getElementById('fdicCert').value);
+  if(!episode_name||!Number.isFinite(cert)){alert('episode_name과 FDIC CERT를 입력하세요.');return}
+  try{await api(`/api/projects/${current}/fdic/link`,{method:'POST',body:JSON.stringify({episode_name,cert,method:'manual_ui'})});toast(`${episode_name} ↔ CERT ${cert} 연결 완료`);await loadFdicStatus();}catch(e){alert(`CERT 연결 실패: ${e.message}`)}
+};
+const _dcvOpenProject=openProject;
+openProject=async function(id,focus,opts={}){const r=await _dcvOpenProject(id,focus,opts);loadFdicStatus();return r;};

@@ -148,7 +148,7 @@ This distinction is critical for the dissertation: `K`, `W`, `m` remain design v
 
 ## 보고서의 연구모형 절 (v0.4.3)
 보고서 **1절**에 박사논문 전체 연구모형(연구대상·연구질문·연구설계·명제·변수·계산 산식·그림 M1~M3)이 자동 포함됩니다. 구현은 `public/model.js`(내용), `public/mathtext.js`(수식 파서), `public/figures.js`(그림 M1~M3)입니다. 수식은 Markdown에서 `$$ \\sigma\\le c_{j} $$ (n)` 형태로 쓰며 HTML·Word에서 모두 렌더링됩니다. 기존에 생성해 둔 보고서는 열 때 자동으로 이 절이 추가되고, 새로 생성하려면 "AI 요약 재생성"을 누르세요.
-## Incremental DCV revalidation (v0.5.3)
+## Incremental DCV revalidation (v0.5.4)
 
 Every new evidence item is versioned and classified by its earliest affected DCV stage. The platform re-runs only downstream dependencies and automatically marks older approvals/reports as stale.
 
@@ -159,3 +159,9 @@ Every new evidence item is versioned and classified by its earliest affected DCV
 
 The approval donut now reflects six evidence gates, not a UI stage counter. Scientific approval is bound to a specific `(research_cycle, evidence_revision)` and becomes stale as soon as new downstream-relevant evidence is registered.
 
+
+
+## FDIC reverification priority (v0.5.5)
+After FDIC Financials/SOD collection, the platform automatically builds a diagnostic reverification queue for CERT-linked episodes. It compares (1) thesis-panel concentration with FDIC state-market HHI and (2) panel peak_outflow with the maximum quarterly peak-to-trough FDIC deposit drawdown over episode year-1 through episode year. Each absolute gap is converted to an empirical percentile among comparable linked episodes; the mean of available percentiles is the discrepancy score. This is a workflow-priority diagnostic, not an outlier test and not an automatic data-correction rule.
+
+Use **External Data → FDIC Episode Connector → 재검증 우선순위** or call `POST /api/projects/:id/fdic/reverification`. Rankings are also available by GET and in the generated thesis report / `fdic_reverification.csv`.

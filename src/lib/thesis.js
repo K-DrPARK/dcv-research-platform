@@ -3,6 +3,7 @@ import { safeJson, hashString, APP_VERSION, nowIso } from './util.js';
 import { wilson } from './stats.js';
 import { empiricalReadiness, loadEmpiricalCalibration } from './empirical.js';
 import { latestProtocol } from './rigor.js';
+import { fdicStatus, getFdicReverificationRankings } from './fdic.js';
 
 const CLASS_SQL = `CASE
   WHEN c.status='confirmed_feasible' OR EXISTS(SELECT 1 FROM validations v WHERE v.candidate_id=c.id AND v.validation_type='human_recompute' AND v.status='CONFIRM') THEN 'confirmed'
@@ -111,6 +112,9 @@ export async function buildThesisData(env, projectId) {
   };
   const params = await all(env.DB, `SELECT parameter_key,value_num,low_num,high_num,parameter_role,provenance_type FROM empirical_parameters WHERE project_id=? ORDER BY parameter_role,parameter_key`, [projectId]);
 
+  const fdic = await fdicStatus(env, projectId);
+  fdic.reverification = await getFdicReverificationRankings(env, projectId, {limit:81});
+
   const jobs = await all(env.DB, `SELECT type,status,COUNT(*) n FROM jobs WHERE project_id=? GROUP BY type,status ORDER BY type,status`, [projectId]);
   const audit = await one(env.DB, `SELECT COUNT(*) n, MIN(created_at) first_at, MAX(created_at) last_at FROM audit_log WHERE project_id=?`, [projectId]);
   const content = safeJson(def?.content_json, {}), constraints = safeJson(cfg.constraints_json, {}), design = safeJson(cfg.design_json, {});
@@ -122,7 +126,7 @@ export async function buildThesisData(env, projectId) {
     candidates: { total: cands.length, by_class: byClass, list: cands, dims, cells, estimators, finalists },
     selected: selected ? { ...selected, by_phase: selectedByPhase, inference:selectedInference } : null,
     approval: appr ? { decision: appr.decision, evidence_level: appr.evidence_level, automatic: !!appr.automatic, created_at: appr.created_at, basis: safeJson(appr.basis_json, {}) } : null,
-    simulation: { phases, scenarios, validations }, reviewer, empirical: { readiness: empirical.status, complete_rows: empirical.complete_rows, target_rows: empirical.target_rows, profile: cal.profile?.version, coefficients: cal.coeff, calibration_uncertainty: cal.local_refit?.uncertainty || null, loss_calibration: cal.loss, parameters: params, panel },
+    simulation: { phases, scenarios, validations }, reviewer, empirical: { readiness: empirical.status, complete_rows: empirical.complete_rows, target_rows: empirical.target_rows, profile: cal.profile?.version, coefficients: cal.coeff, calibration_uncertainty: cal.local_refit?.uncertainty || null, loss_calibration: cal.loss, parameters: params, panel, fdic },
     reproducibility: { design_seed: hashString(`${projectId}:design`), protocol: protocol ? {version:protocol.version,hash:protocol.protocol_hash,frozen_at:protocol.frozen_at,status:protocol.status,definition_version:protocol.definition_version} : null, jobs, audit: { n: audit?.n ?? 0, first_at: audit?.first_at, last_at: audit?.last_at } }
   };
 }
@@ -142,8 +146,13 @@ export async function exportCsv(env, projectId, name) {
     case 'validations': return q(`SELECT candidate_id,validation_type,status,result_json,created_at FROM validations WHERE project_id=? ORDER BY created_at`, ['candidate_id', 'validation_type', 'status', 'result_json', 'created_at']);
     case 'reviewer_observations': return q(`SELECT participant_hash,ai_confidence,ai_correct,human_accept,response_ms,recovered,recovery_ms,created_at FROM reviewer_observations WHERE project_id=? ORDER BY created_at`, ['participant_hash', 'ai_confidence', 'ai_correct', 'human_accept', 'response_ms', 'recovered', 'recovery_ms', 'created_at']);
     case 'episodes': return q(`SELECT episode_name,year,country,peak_outflow,concentration,digital_adoption,severity,failed,provenance_type,reliability_grade,source_note FROM empirical_episodes WHERE project_id=? ORDER BY year,episode_name`, ['episode_name', 'year', 'country', 'peak_outflow', 'concentration', 'digital_adoption', 'severity', 'failed', 'provenance_type', 'reliability_grade', 'source_note']);
+    case 'fdic_links': return q(`SELECT e.episode_name,e.year,l.cert,l.institution_name,l.match_status,l.match_method,l.match_score,l.confirmed_at FROM fdic_episode_links l JOIN empirical_episodes e ON e.id=l.episode_id WHERE l.project_id=? ORDER BY e.year,e.episode_name`, ['episode_name','year','cert','institution_name','match_status','match_method','match_score','confirmed_at']);
+    case 'fdic_financials': return q(`SELECT e.episode_name,f.cert,f.repdte,f.asset,f.deposits_total,f.deposits_domestic,f.uninsured_deposits,f.equity,f.fetched_at FROM fdic_financial_observations f JOIN empirical_episodes e ON e.id=f.episode_id WHERE f.project_id=? ORDER BY e.episode_name,f.repdte`, ['episode_name','cert','repdte','asset','deposits_total','deposits_domestic','uninsured_deposits','equity','fetched_at']);
+    case 'fdic_sod': return q(`SELECT COALESCE(e.episode_name,'') episode_name,s.cert,s.year,s.branch_num,s.uninumber,s.state,s.county,s.cbsa,s.branch_deposits,s.fetched_at FROM fdic_sod_observations s LEFT JOIN empirical_episodes e ON e.id=s.episode_id WHERE s.project_id=? ORDER BY s.year,s.cert,s.state,s.branch_num`, ['episode_name','cert','year','branch_num','uninumber','state','county','cbsa','branch_deposits','fetched_at']);
+    case 'fdic_market_metrics': return q(`SELECT e.episode_name,m.cert,m.year,m.market_type,m.market_key,m.hhi,m.bank_count,m.total_deposits,m.target_bank_share,m.methodology_version,m.quality_json FROM fdic_market_metrics m JOIN empirical_episodes e ON e.id=m.episode_id WHERE m.project_id=? ORDER BY m.year,e.episode_name`, ['episode_name','cert','year','market_type','market_key','hhi','bank_count','total_deposits','target_bank_share','methodology_version','quality_json']);
+    case 'fdic_reverification': return q(`SELECT e.episode_name,e.year,r.cert,r.rank_num,r.priority_level,r.discrepancy_score,r.provenance_type,r.original_concentration,r.fdic_hhi,r.concentration_gap,r.concentration_percentile,r.original_peak_outflow,r.fdic_peak_drawdown,r.deposit_gap,r.deposit_percentile,r.financial_points,r.peak_drawdown_date,r.methodology_version,r.reason_json FROM fdic_reverification_rankings r JOIN empirical_episodes e ON e.id=r.episode_id WHERE r.project_id=? ORDER BY COALESCE(r.rank_num,999),e.year,e.episode_name`, ['episode_name','year','cert','rank_num','priority_level','discrepancy_score','provenance_type','original_concentration','fdic_hhi','concentration_gap','concentration_percentile','original_peak_outflow','fdic_peak_drawdown','deposit_gap','deposit_percentile','financial_points','peak_drawdown_date','methodology_version','reason_json']);
     case 'audit_log': return q(`SELECT created_at,actor,action,entity_type,entity_id,detail_json FROM audit_log WHERE project_id=? ORDER BY created_at`, ['created_at', 'actor', 'action', 'entity_type', 'entity_id', 'detail_json']);
     default: return null;
   }
 }
-export const EXPORT_NAMES = ['candidates', 'simulation_runs', 'validations', 'reviewer_observations', 'episodes', 'audit_log'];
+export const EXPORT_NAMES = ['candidates', 'simulation_runs', 'validations', 'reviewer_observations', 'episodes', 'fdic_links', 'fdic_financials', 'fdic_sod', 'fdic_market_metrics', 'fdic_reverification', 'audit_log'];

@@ -55,3 +55,6 @@ The engine spends additional simulation budget on UNRESOLVED designs and freezes
 - `adaptive`
 
 All estimators are evaluated inside the same stochastic environment and constraints rather than by prediction accuracy alone.
+
+## FDIC reverification-priority layer (v0.5.5)
+`fdic_reverification_rankings` is a diagnostic/audit layer downstream of FDIC collection. It never mutates `empirical_episodes`. The score uses empirical percentiles of absolute gaps for comparable dimensions: panel concentration vs FDIC state-market HHI; panel peak_outflow vs maximum quarterly peak-to-trough FDIC deposit drawdown in year-1..year. The average percentile is used only to order manual source reverification. Market/window mismatch is explicitly retained in `reason_json` and report text.

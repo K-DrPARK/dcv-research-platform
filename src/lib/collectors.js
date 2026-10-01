@@ -1,6 +1,7 @@
 import { all, run, audit } from './db.js';
 import { nowIso, uid, safeJson } from './util.js';
 import { importEmpiricalEpisodes } from './empirical.js';
+import { collectFdicSource } from './fdic.js';
 
 function getPath(obj, path){ if(!path) return obj; return String(path).split('.').reduce((a,k)=>a?.[k], obj); }
 function parseCsv(text){
@@ -24,6 +25,13 @@ export async function collectProject(env, projectId){
   let inserted=0, empiricalRows=0, errors=[];
   for(const s of sources){
     try{
+      if(s.kind==='fdic_sod' || s.kind==='fdic_financials'){
+        const fr=await collectFdicSource(env,projectId,s);
+        inserted+=Number(fr.inserted||0);
+        if(fr.errors?.length) errors.push(...fr.errors.map(x=>({source:s.name,...x})));
+        await run(env.DB,`UPDATE data_sources SET last_fetched_at=?,last_status=? WHERE id=?`,[nowIso(),fr.errors?.length?`partial:${fr.errors.length}`:'ok',s.id]);
+        continue;
+      }
       const headers=safeJson(s.headers_json,{});
       const resp=await fetch(s.url,{method:s.method||'GET',headers});
       if(!resp.ok) throw new Error(`HTTP ${resp.status}`);

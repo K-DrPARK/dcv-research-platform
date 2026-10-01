@@ -1,3 +1,25 @@
+# Changelog
+
+## v0.5.5 — FDIC discrepancy diagnostics & reverification priority
+- Added `0011_fdic_reverification_priority.sql` and `fdic_reverification_rankings` to persist episode-level diagnostic comparisons without overwriting the thesis panel.
+- Added automatic comparison of panel `concentration` vs FDIC SOD state-market HHI and panel `peak_outflow` vs FDIC Financials maximum quarterly peak-to-trough deposit drawdown.
+- Added empirical-percentile discrepancy score across available dimensions and CRITICAL/HIGH/MEDIUM/LOW/INSUFFICIENT reverification priority tiers.
+- Reconstructed provenance is a context/tie-break signal only, not a numeric penalty; ranking remains driven by observed discrepancy.
+- Added automatic ranking refresh after every FDIC collection, API endpoints (`GET/POST /fdic/reverification`), dashboard TOP ranking table, report Table 3C, thesis CSV export, and audit event.
+- Added explicit comparability guardrails: FDIC state HHI and quarterly drawdown are validation covariates/proxies and never silently replace thesis `concentration` or `peak_outflow`.
+- Added regression tests for ranking order, priority classification, reason metadata, and non-overwrite behavior.
+
+# v0.5.4 — FDIC SOD + Financials automatic connectors
+
+- Added episode↔FDIC CERT linkage registry with conservative auto-match from the official Failures endpoint and manual confirmation path.
+- Added CERT-linked Financials collection (episode year-1 through episode year, available from 1992).
+- Added CERT-linked SOD collection (available from 1994) and state-market deposit HHI verification metric.
+- FDIC-derived metrics are verification covariates only; they never silently overwrite thesis `concentration` or `peak_outflow`.
+- Added optional `FDIC_API_KEY` secret support (`X-Api-Key`) for FDIC's evolving API governance.
+- Added one-click FDIC package enablement (register both connectors → conservative CERT auto-match → queue collection), plus manual matching/collection controls.
+- Scheduled re-fetches are change-aware: unchanged FDIC payloads do not create new evidence revisions or needless DCV revalidation cycles.
+- Added migration `0010_fdic_connectors.sql` and connector tests.
+
 # v0.5.3 — Incremental DCV Revalidation
 
 - Added evidence revisions and research cycles.

@@ -52,7 +52,7 @@ test('thesis toolkit resolves DCV core dynamically so module order cannot break 
 
 test('initial boot retries transient project load failures and analytical heights use right card as reference',()=>{
   assert.match(app,/for\(let attempt=0;attempt<3;attempt\+\+\)/);
-  assert.match(app,/const target=Math\.ceil\(right\.scrollHeight\)/);
-  assert.match(app,/const target=Math\.ceil\(approval\.scrollHeight\)/);
-  assert.match(app,/setProperty\('height',`\$\{target\}px`,'important'\)/);
+  assert.match(app,/const target=reference\.getBoundingClientRect\(\)\.height/);
+  assert.match(app,/matchReference\(right,\[left,mid\]\)/);
+  assert.match(app,/setProperty\('height',target\+'px','important'\)/);
 });

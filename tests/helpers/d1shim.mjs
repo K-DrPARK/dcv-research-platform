@@ -1,11 +1,12 @@
 import { DatabaseSync } from 'node:sqlite';
 import fs from 'node:fs';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 // 실제 SQLite(node:sqlite) 위에 D1 인터페이스(prepare/bind/first/all/run/batch)를 얹은 테스트용 shim
 export function makeDb() {
   const db = new DatabaseSync(':memory:');
-  const dir = path.join(path.dirname(new URL(import.meta.url).pathname), '../../migrations');
+  const dir = path.join(path.dirname(fileURLToPath(import.meta.url)), '../../migrations');
   for (const f of fs.readdirSync(dir).filter(x => x.endsWith('.sql')).sort()) db.exec(fs.readFileSync(path.join(dir, f), 'utf8'));
   const stmt = (sql, binds = []) => ({
     bind: (...b) => stmt(sql, b),

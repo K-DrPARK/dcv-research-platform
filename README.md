@@ -1,6 +1,10 @@
-# DCV Research Platform v0.5.0
+# DCV Research Platform v0.5.6
 
 > Defense Rigor release: frozen protocol, simultaneous inference, calibration uncertainty propagation, participant-cluster human validation, and human scientific sign-off.
+
+## v0.5.6 Episode Reverification Workbench
+
+CRITICAL/HIGH FDIC discrepancy episode를 클릭하면 한 화면에서 원 논문 값, FDIC CERT 연결, Financials 분기 예금 시계열, SOD branch 원자료, discrepancy 원인 후보, 8개 재검증 체크리스트와 인간 검토 결론을 처리할 수 있습니다. Workbench는 원 데이터를 자동 대체하지 않으며, `RESOLVED`는 모든 체크리스트 완료 + reviewer note를 요구합니다. 최초 완료 시 `REVERIFICATION_REVIEW` evidence revision을 생성하여 이전 승인/보고서를 stale 처리하고 검증 단계부터 다시 평가합니다.
 
 # DCV Research Platform v0.2
 

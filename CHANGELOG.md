@@ -1,5 +1,15 @@
 # Changelog
 
+## v0.5.6 — Episode Reverification Workbench
+- Added a full-screen Bootstrap Workbench for CRITICAL/HIGH FDIC discrepancy episodes.
+- Side-by-side view: thesis-panel values, FDIC CERT linkage, state-market HHI, Financials deposit dynamics, and SOD branch-level raw observations.
+- Added conservative auto-suggested discrepancy causes (market definition, time window, accounting definition, reconstruction, coverage, linkage); suggestions never auto-determine the scientific conclusion.
+- Added an 8-item human reverification checklist and reviewer-controlled status/action workflow: OPEN / IN_REVIEW / ESCALATED / RESOLVED.
+- RESOLVED requires every checklist item and a reviewer note; completion creates a new REVERIFICATION_REVIEW evidence revision, stales the previous approval/report, and re-runs validation without silently changing panel values.
+- Added D1 migration `0012_fdic_reverification_workbench.sql`, audit trail, report Table 3D, Workbench review summary, and `fdic_reverification_reviews.csv` export.
+- Added regression tests for raw-evidence exposure, suggested causes, non-overwrite behavior, and checklist-gated resolution.
+
+
 ## v0.5.5 — FDIC discrepancy diagnostics & reverification priority
 - Added `0011_fdic_reverification_priority.sql` and `fdic_reverification_rankings` to persist episode-level diagnostic comparisons without overwriting the thesis panel.
 - Added automatic comparison of panel `concentration` vs FDIC SOD state-market HHI and panel `peak_outflow` vs FDIC Financials maximum quarterly peak-to-trough deposit drawdown.

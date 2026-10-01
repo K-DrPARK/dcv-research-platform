@@ -11,7 +11,7 @@ import { scientificSignoff } from './lib/approve.js';
 import { latestProtocol } from './lib/rigor.js';
 import { registerEvidence, approvalGates } from './lib/evidence.js';
 import { SOURCE_PRESETS } from './lib/source_presets.js';
-import { resolveFdicLinks, confirmFdicLink, fdicStatus, enableFdicConnectors, buildFdicReverificationRankings, getFdicReverificationRankings } from './lib/fdic.js';
+import { resolveFdicLinks, confirmFdicLink, fdicStatus, enableFdicConnectors, buildFdicReverificationRankings, getFdicReverificationRankings, getFdicReverificationWorkbench, saveFdicReverificationReview, attachFdicReviewEvidenceRevision } from './lib/fdic.js';
 
 async function bodyJson(request){ try{return await request.json();}catch{return {};} }
 function pathParts(url){ return new URL(url).pathname.split('/').filter(Boolean); }
@@ -69,6 +69,8 @@ async function api(request,env){
     if(parts[3]==='fdic' && parts[4]==='collect' && method==='POST'){ await enqueueOnce(env,projectId,'collect_project',{refresh:true,fdic_manual:true},20); return json({status:'queued'}); }
     if(parts[3]==='fdic' && parts[4]==='reverification' && method==='POST'){ return json(await buildFdicReverificationRankings(env,projectId)); }
     if(parts[3]==='fdic' && parts[4]==='reverification' && method==='GET'){ return json(await getFdicReverificationRankings(env,projectId,{limit:Number(url.searchParams.get('limit')||81)})); }
+    if(parts[3]==='fdic' && parts[4]==='workbench' && parts[5] && method==='GET'){ try{return json(await getFdicReverificationWorkbench(env,projectId,parts[5]));}catch(e){return json({error:String(e.message||e)},404);} }
+    if(parts[3]==='fdic' && parts[4]==='workbench' && parts[5] && method==='POST'){ const b=await bodyJson(request); try{const saved=await saveFdicReverificationReview(env,projectId,parts[5],b); let ev=null; if(saved.needs_evidence_registration){ ev=await registerEvidence(env,projectId,{kind:'REVERIFICATION_REVIEW',impact_from:'validate',source:'fdic_workbench',detail:{episode_id:parts[5],review_status:saved.review_status,recommended_action:saved.recommended_action,cause_code:b.cause_code||''}}); await attachFdicReviewEvidenceRevision(env,projectId,parts[5],ev.evidence_revision); } return json({...saved,revalidation:ev});}catch(e){return json({error:String(e.message||e)},400);} }
     if(parts[3]==='sources' && method==='POST'){
       const b=await bodyJson(request), id=uid('source');
       await run(env.DB,`INSERT INTO data_sources(id,project_id,name,kind,url,method,headers_json,mapping_json,enabled,cadence_minutes,created_at) VALUES(?,?,?,?,?,?,?,?,1,?,?)`,[id,projectId,b.name||'External Source',b.kind||'json',b.url,b.method||'GET',JSON.stringify(b.headers||{}),JSON.stringify(b.mapping||{}),Number(b.cadence_minutes||60),nowIso()]);

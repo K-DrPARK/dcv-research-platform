@@ -140,3 +140,38 @@ test('FDIC reverification ranking marks linked episodes without comparable dimen
   const g=await getFdicReverificationRankings({DB},'p');
   assert.equal(g.summary.insufficient,1);
 });
+
+import { getFdicReverificationWorkbench, saveFdicReverificationReview } from '../src/lib/fdic.js';
+
+test('Episode Reverification Workbench exposes panel values, FDIC raw evidence and suggested causes without overwriting panel', async()=>{
+  const DB=makeDb(), now='2026-10-01T00:00:00.000Z';
+  DB.raw.prepare(`INSERT INTO projects(id,name,description,status,current_stage,auto_run,auto_approve,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?)`).run('p','x','', 'draft','define',1,0,now,now);
+  seedRankEpisode(DB,{id:'e',name:'workbench_bank',C:.50,out:.10,prov:'estimated',cert:77});
+  seedMetric(DB,{episode:'e',cert:77,hhi:.82});
+  seedFin(DB,{episode:'e',cert:77,points:[['2007-12-31',100],['2008-03-31',92],['2008-06-30',70],['2008-12-31',65]]});
+  DB.raw.prepare(`INSERT INTO fdic_sod_observations(id,project_id,episode_id,cert,year,branch_num,uninumber,state,county,cbsa,branch_deposits,payload_json,fetched_at,row_key) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).run('s','p','e',77,2008,'1','u','CA','X','Y',50,'{}',now,'2008|77|u|1|CA');
+  await buildFdicReverificationRankings({DB},'p');
+  const w=await getFdicReverificationWorkbench({DB},'p','e');
+  assert.equal(w.episode.concentration,.50);
+  assert.equal(w.ranking.fdic_hhi,.82);
+  assert.equal(w.financials.rows.length,4);
+  assert.equal(w.sod.rows.length,1);
+  assert.ok(w.suggested_causes.some(x=>x.code==='MARKET_DEFINITION'));
+  assert.ok(w.suggested_causes.some(x=>x.code==='PANEL_RECONSTRUCTION'));
+  const original=DB.raw.prepare(`SELECT concentration,peak_outflow FROM empirical_episodes WHERE id='e'`).get();
+  assert.equal(original.concentration,.50); assert.equal(original.peak_outflow,.10);
+});
+
+test('Workbench RESOLVED requires every checklist item and a reviewer note, then requests evidence registration', async()=>{
+  const DB=makeDb(), now='2026-10-01T00:00:00.000Z';
+  DB.raw.prepare(`INSERT INTO projects(id,name,description,status,current_stage,auto_run,auto_approve,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?)`).run('p','x','', 'draft','define',1,0,now,now);
+  seedRankEpisode(DB,{id:'e',name:'review_bank',C:.50,out:.10,prov:'estimated',cert:88});
+  seedMetric(DB,{episode:'e',cert:88,hhi:.80}); seedFin(DB,{episode:'e',cert:88,points:[['2007-12-31',100],['2008-12-31',70]]});
+  await buildFdicReverificationRankings({DB},'p');
+  await assert.rejects(()=>saveFdicReverificationReview({DB},'p','e',{review_status:'RESOLVED',reviewer_note:'checked',checklist:{cert_link:true}}),/checklist_incomplete/);
+  const checks=Object.fromEntries((await getFdicReverificationWorkbench({DB},'p','e')).checklist.map(x=>[x.id,true]));
+  const r=await saveFdicReverificationReview({DB},'p','e',{review_status:'RESOLVED',cause_code:'PANEL_RECONSTRUCTION',reviewer_name:'PI',reviewer_note:'Primary source check completed; keep panel pending source archive.',recommended_action:'KEEP_PANEL',checklist:checks});
+  assert.equal(r.review_status,'RESOLVED'); assert.equal(r.checklist_complete,true); assert.equal(r.needs_evidence_registration,true);
+  const row=DB.raw.prepare(`SELECT * FROM fdic_reverification_reviews WHERE episode_id='e'`).get();
+  assert.equal(row.recommended_action,'KEEP_PANEL'); assert.equal(row.review_status,'RESOLVED');
+});

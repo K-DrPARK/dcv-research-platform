@@ -258,5 +258,88 @@ export async function fdicStatus(env,projectId){
   const links=await all(env.DB,`SELECT l.id,l.episode_id,e.episode_name,e.year,l.cert,l.institution_name,l.match_status,l.match_method,l.match_score,l.candidate_json FROM fdic_episode_links l JOIN empirical_episodes e ON e.id=l.episode_id WHERE l.project_id=? ORDER BY CASE l.match_status WHEN 'confirmed' THEN 0 ELSE 1 END,e.year,e.episode_name LIMIT 100`,[projectId]);
   const latestMetrics=await all(env.DB,`SELECT m.*,e.episode_name FROM fdic_market_metrics m JOIN empirical_episodes e ON e.id=m.episode_id WHERE m.project_id=? ORDER BY m.updated_at DESC LIMIT 30`,[projectId]);
   const reverification=await getFdicReverificationRankings(env,projectId,{limit:10});
-  return {links:{total:Number(linkCounts?.total||0),confirmed:Number(linkCounts?.confirmed||0),pending:Number(linkCounts?.pending||0),rows:links},financials:fin||{},sod:sod||{},market_metrics:{...(metrics||{}),rows_detail:latestMetrics},reverification,methodology:{financials:'CERT-linked quarterly FDIC Financials, episode year-1 through episode year; stored as verification covariates',sod:'CERT-linked SOD at episode year; optional state-market HHI uses all institutions in target bank primary deposit state',promotion:'FDIC-derived measures do not overwrite thesis concentration/peak_outflow automatically'}};
+  const reviews=await one(env.DB,`SELECT COUNT(*) total,SUM(CASE WHEN review_status='RESOLVED' THEN 1 ELSE 0 END) resolved,SUM(CASE WHEN review_status='IN_REVIEW' THEN 1 ELSE 0 END) in_review,SUM(CASE WHEN review_status='ESCALATED' THEN 1 ELSE 0 END) escalated FROM fdic_reverification_reviews WHERE project_id=?`,[projectId]);
+  const reviewRows=await all(env.DB,`SELECT v.review_status,v.cause_code,v.recommended_action,v.reviewer_name,v.evidence_revision,v.reviewed_at,v.updated_at,e.episode_name,e.year,r.priority_level,r.rank_num FROM fdic_reverification_reviews v JOIN empirical_episodes e ON e.id=v.episode_id JOIN fdic_reverification_rankings r ON r.episode_id=v.episode_id AND r.project_id=v.project_id WHERE v.project_id=? ORDER BY CASE v.review_status WHEN 'RESOLVED' THEN 0 WHEN 'ESCALATED' THEN 1 ELSE 2 END,COALESCE(r.rank_num,999) LIMIT 30`,[projectId]);
+  return {links:{total:Number(linkCounts?.total||0),confirmed:Number(linkCounts?.confirmed||0),pending:Number(linkCounts?.pending||0),rows:links},financials:fin||{},sod:sod||{},market_metrics:{...(metrics||{}),rows_detail:latestMetrics},reverification,reviews:{summary:reviews||{},rows:reviewRows},methodology:{financials:'CERT-linked quarterly FDIC Financials, episode year-1 through episode year; stored as verification covariates',sod:'CERT-linked SOD at episode year; optional state-market HHI uses all institutions in target bank primary deposit state',promotion:'FDIC-derived measures do not overwrite thesis concentration/peak_outflow automatically'}};
+}
+
+
+const REVERIFY_CHECKLIST=[
+  {id:'cert_link',label:'FDIC CERT 연결과 기관명이 원 사례와 일치하는지 확인'},
+  {id:'panel_source',label:'논문/패널 원자료와 derivation rule을 확인'},
+  {id:'financial_coverage',label:'FDIC Financials 분기 커버리지와 단위를 확인'},
+  {id:'sod_market',label:'SOD 시장 정의(state HHI)가 논문 C와 다른 범위임을 확인'},
+  {id:'concentration_explained',label:'concentration discrepancy 원인을 설명'},
+  {id:'deposit_explained',label:'deposit dynamics discrepancy 원인을 설명'},
+  {id:'primary_crosscheck',label:'가능한 primary source로 교차검증'},
+  {id:'decision_recorded',label:'패널 유지/수정후보/추가자료 필요 결론을 기록'}
+];
+
+function inferReverificationCauses(row,finSummary){
+  const out=[];
+  const cg=toNum(row?.concentration_gap),dg=toNum(row?.deposit_gap),score=toNum(row?.discrepancy_score);
+  if(Number.isFinite(cg)&&cg>=0.10)out.push({code:'MARKET_DEFINITION',label:'시장 정의 차이',why:'논문 concentration C와 FDIC state-market HHI의 지리·기관 범위가 다를 가능성'});
+  if(Number.isFinite(dg)&&dg>=0.05)out.push({code:'TIME_WINDOW',label:'측정기간 차이',why:'논문 peak_outflow와 FDIC 분기 peak-to-trough drawdown의 시간창이 다름'});
+  if(Number.isFinite(dg)&&dg>=0.05)out.push({code:'ACCOUNTING_DEFINITION',label:'예금 정의 차이',why:'FDIC total/domestic deposits와 논문에서 재구성한 outflow 분모·범위가 다를 수 있음'});
+  if(row?.provenance_type!=='verified')out.push({code:'PANEL_RECONSTRUCTION',label:'재구성값 오차',why:'해당 episode가 primary-source verified가 아니므로 derivation error 가능성'});
+  if(Number(finSummary?.deposit_points||0)<4)out.push({code:'LIMITED_COVERAGE',label:'Financials 커버리지 부족',why:'분기 관측점이 4개 미만이어서 peak drawdown 진단이 불안정할 수 있음'});
+  if(Number(row?.match_score||1)<0.95)out.push({code:'CERT_LINK',label:'CERT 연결 재확인',why:'기관 매칭 점수가 완전 일치 수준이 아니므로 linkage 자체를 재검토할 가치가 있음'});
+  if(Number.isFinite(score)&&score>=0.80)out.push({code:'MULTIPLE',label:'복합 원인 가능성',why:'두 discrepancy 차원의 결합 점수가 상위 20%이므로 단일 원인으로 단정하지 않음'});
+  if(!out.length)out.push({code:'UNKNOWN',label:'추가 조사 필요',why:'자동 규칙으로 특정 원인을 제안할 근거가 충분하지 않음'});
+  return out;
+}
+
+export async function getFdicReverificationWorkbench(env,projectId,episodeId){
+  const row=await one(env.DB,`SELECT r.*,e.episode_name,e.year,e.digital_adoption,e.severity,e.failed,e.source_note,e.metadata_json,
+    l.institution_name,l.match_status,l.match_method,l.match_score,l.candidate_json,
+    m.market_type,m.market_key,m.bank_count,m.total_deposits,m.target_bank_share,m.quality_json
+    FROM fdic_reverification_rankings r JOIN empirical_episodes e ON e.id=r.episode_id
+    LEFT JOIN fdic_episode_links l ON l.project_id=r.project_id AND l.episode_id=r.episode_id
+    LEFT JOIN fdic_market_metrics m ON m.project_id=r.project_id AND m.episode_id=r.episode_id
+    WHERE r.project_id=? AND r.episode_id=? ORDER BY m.updated_at DESC LIMIT 1`,[projectId,episodeId]);
+  if(!row)throw new Error('reverification_episode_not_found');
+  const financials=await all(env.DB,`SELECT repdte,asset,deposits_total,deposits_domestic,uninsured_deposits,equity,payload_json,fetched_at FROM fdic_financial_observations WHERE project_id=? AND episode_id=? ORDER BY repdte`,[projectId,episodeId]);
+  const sod=await all(env.DB,`SELECT year,cert,branch_num,state,county,cbsa,branch_deposits,payload_json,fetched_at FROM fdic_sod_observations WHERE project_id=? AND episode_id=? ORDER BY branch_deposits DESC LIMIT 250`,[projectId,episodeId]);
+  const finSummary=summarizeFinancialRows(financials.map(x=>({REPDTE:x.repdte,DEPDOM:x.deposits_domestic,DEP:x.deposits_total,ASSET:x.asset})));
+  const review=await one(env.DB,`SELECT * FROM fdic_reverification_reviews WHERE project_id=? AND episode_id=?`,[projectId,episodeId]);
+  return {
+    episode:{id:row.episode_id,name:row.episode_name,year:row.year,provenance_type:row.provenance_type,concentration:row.original_concentration,peak_outflow:row.original_peak_outflow,digital_adoption:row.digital_adoption,severity:row.severity,failed:row.failed,source_note:row.source_note,raw:safeObj(row.metadata_json)},
+    ranking:{rank_num:row.rank_num,priority_level:row.priority_level,discrepancy_score:row.discrepancy_score,fdic_hhi:row.fdic_hhi,concentration_gap:row.concentration_gap,concentration_percentile:row.concentration_percentile,fdic_peak_drawdown:row.fdic_peak_drawdown,deposit_gap:row.deposit_gap,deposit_percentile:row.deposit_percentile,financial_points:row.financial_points,peak_drawdown_date:row.peak_drawdown_date,reasons:safeObj(row.reason_json)},
+    link:{cert:row.cert,institution_name:row.institution_name,match_status:row.match_status,match_method:row.match_method,match_score:row.match_score,candidates:safeObj(row.candidate_json)},
+    market:{type:row.market_type,key:row.market_key,hhi:row.fdic_hhi,bank_count:row.bank_count,total_deposits:row.total_deposits,target_bank_share:row.target_bank_share,quality:safeObj(row.quality_json)},
+    financials:{summary:finSummary,rows:financials.map(x=>({...x,payload:safeObj(x.payload_json)}))},
+    sod:{rows:sod.map(x=>({...x,payload:safeObj(x.payload_json)})),returned:sod.length},
+    suggested_causes:inferReverificationCauses({...row,match_score:row.match_score},finSummary),
+    checklist:REVERIFY_CHECKLIST,
+    review:review?{...review,checklist:safeObj(review.checklist_json),resolution:safeObj(review.resolution_json)}:{review_status:'OPEN',cause_code:null,cause_note:'',checklist:{},reviewer_name:'',reviewer_note:'',recommended_action:'NO_CHANGE',resolution:{}}
+  };
+}
+
+function safeObj(v){try{return typeof v==='string'?JSON.parse(v||'{}'):(v||{});}catch{return {};}}
+
+export async function saveFdicReverificationReview(env,projectId,episodeId,input={}){
+  const exists=await one(env.DB,`SELECT e.id,r.priority_level FROM empirical_episodes e JOIN fdic_reverification_rankings r ON r.episode_id=e.id AND r.project_id=e.project_id WHERE e.project_id=? AND e.id=?`,[projectId,episodeId]);
+  if(!exists)throw new Error('reverification_episode_not_found');
+  const allowedStatus=new Set(['OPEN','IN_REVIEW','RESOLVED','ESCALATED']);
+  const allowedAction=new Set(['NO_CHANGE','KEEP_PANEL','UPDATE_PROVENANCE','REPLACE_CANDIDATE','NEED_PRIMARY_SOURCE','NEED_METHOD_REVIEW']);
+  const status=allowedStatus.has(String(input.review_status||''))?String(input.review_status):'IN_REVIEW';
+  const action=allowedAction.has(String(input.recommended_action||''))?String(input.recommended_action):'NO_CHANGE';
+  const checklist=(input.checklist&&typeof input.checklist==='object')?input.checklist:{};
+  const known=new Set(REVERIFY_CHECKLIST.map(x=>x.id));
+  const cleaned={}; for(const [k,v] of Object.entries(checklist))if(known.has(k))cleaned[k]=!!v;
+  const complete=REVERIFY_CHECKLIST.every(x=>cleaned[x.id]===true);
+  if(status==='RESOLVED'&&!complete)throw new Error('reverification_checklist_incomplete');
+  if(status==='RESOLVED'&&!String(input.reviewer_note||'').trim())throw new Error('reverification_note_required');
+  const now=nowIso(),old=await one(env.DB,`SELECT * FROM fdic_reverification_reviews WHERE project_id=? AND episode_id=?`,[projectId,episodeId]);
+  let evidenceRevision=old?.evidence_revision||null;
+  const id=old?.id||uid('fdicreview');
+  await run(env.DB,`INSERT INTO fdic_reverification_reviews(id,project_id,episode_id,review_status,cause_code,cause_note,checklist_json,reviewer_name,reviewer_note,recommended_action,resolution_json,evidence_revision,reviewed_at,created_at,updated_at)
+    VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(project_id,episode_id) DO UPDATE SET review_status=excluded.review_status,cause_code=excluded.cause_code,cause_note=excluded.cause_note,checklist_json=excluded.checklist_json,reviewer_name=excluded.reviewer_name,reviewer_note=excluded.reviewer_note,recommended_action=excluded.recommended_action,resolution_json=excluded.resolution_json,reviewed_at=excluded.reviewed_at,updated_at=excluded.updated_at`,[
+    id,projectId,episodeId,status,String(input.cause_code||''),String(input.cause_note||''),JSON.stringify(cleaned),String(input.reviewer_name||''),String(input.reviewer_note||''),action,JSON.stringify(input.resolution||{}),evidenceRevision,status==='RESOLVED'?now:null,old?.created_at||now,now]);
+  await audit(env,projectId,'user','fdic.reverification.review.saved','empirical_episode',episodeId,{review_status:status,cause_code:input.cause_code||'',recommended_action:action,checklist_complete:complete});
+  return {id,review_status:status,checklist_complete:complete,recommended_action:action,needs_evidence_registration:status==='RESOLVED'&&old?.review_status!=='RESOLVED'};
+}
+
+export async function attachFdicReviewEvidenceRevision(env,projectId,episodeId,evidenceRevision){
+  await run(env.DB,`UPDATE fdic_reverification_reviews SET evidence_revision=?,updated_at=? WHERE project_id=? AND episode_id=?`,[Number(evidenceRevision),nowIso(),projectId,episodeId]);
 }

@@ -4,7 +4,7 @@ import { nowIso, uid } from './util.js';
 const STAGES=['define','measure','compute','validate','recompute','approved','report'];
 export function impactForEvidence(kind){
   const k=String(kind||'').toUpperCase();
-  if(k==='HUMAN_TRIAL'||k==='HUMAN_REVIEW') return 'validate';
+  if(k==='HUMAN_TRIAL'||k==='HUMAN_REVIEW'||k==='REVERIFICATION_REVIEW') return 'validate';
   if(k==='RAW_OBSERVATION'||k==='EXTERNAL_DATA'||k==='EMPIRICAL_EPISODE') return 'measure';
   if(k==='SCENARIO'||k==='BENCHMARK_UPDATE') return 'compute';
   if(k==='DESIGN_CHANGE'||k==='CONSTRAINT_CHANGE'||k==='RQ_CHANGE') return 'define';
@@ -41,7 +41,8 @@ export async function registerEvidence(env,projectId,{kind,impact_from=null,sour
     await run(env.DB,`UPDATE jobs SET status='failed',last_error='superseded_by_evidence_revision',updated_at=? WHERE project_id=? AND status IN ('queued','running') AND type IN ('seed_candidates','compute_candidate','validate_project','fit_reviewer','recompute_project','finalize_recompute','approve_project','generate_report')`,[ts,projectId]);
   }
   // Human evidence reuses robust computation, but reviewer model + recompute must be refreshed.
-  if(impact==='validate') await enqueueOnce(env,projectId,'fit_reviewer',{},60,1);
+  if(impact==='validate' && String(kind||'').toUpperCase()==='REVERIFICATION_REVIEW') await enqueueOnce(env,projectId,'validate_project',{},58,1);
+  else if(impact==='validate') await enqueueOnce(env,projectId,'fit_reviewer',{},60,1);
   else if(impact==='measure') await enqueueOnce(env,projectId,'measure_project',{},30,1);
   else if(impact==='compute') await enqueueOnce(env,projectId,'seed_candidates',{},35,1);
   else await enqueueOnce(env,projectId,'define_project',{},10,1);

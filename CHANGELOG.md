@@ -1,5 +1,11 @@
 # Changelog
 
+## v0.5.14 — Figure 7 layout fix
+- Delegation Evidence Funnel의 마지막 Human 블록과 Final strict survivor 문구가 겹치던 문제를 수정했습니다.
+- Funnel 본문 높이를 단계 수에 따라 동적으로 계산하고 footer 영역을 별도로 확보했습니다.
+- 긴 주석을 두 줄로 분리하고 source snapshot을 별도 행으로 이동했습니다.
+
+
 ## v0.5.13 — Validation/Regret UX clarity
 - Clarified Matrix/Funnel lifecycle: G3 Robust Validation creates the matrix/funnel; G5 Recompute confirms the Human layer; G6 is human scientific sign-off, not another statistical test.
 - Split the dashboard conceptually into `Robust Minimax Regret` and `Human Recompute` instead of implying that human trials directly recompute the regret metric.

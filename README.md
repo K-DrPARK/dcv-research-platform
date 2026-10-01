@@ -1,6 +1,10 @@
-# DCV Research Platform v0.5.13
+# DCV Research Platform v0.5.14
 
 > Defense Rigor release: frozen protocol, simultaneous inference, calibration uncertainty propagation, participant-cluster human validation, and human scientific sign-off.
+
+## v0.5.14 Figure 7 layout fix
+- Figure 7의 Human 단계와 최종 strict survivor/주석 영역을 분리해 글자 겹침을 제거했습니다.
+- 단계 수에 따라 SVG 높이를 자동 계산하고, 하단 요약은 별도 footer 영역에 배치합니다.
 
 ## v0.5.13 Validation/Regret UX clarity
 

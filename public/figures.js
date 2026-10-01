@@ -100,7 +100,9 @@ export function figExternalValidationMatrix(t) {
 export function figDelegationEvidenceFunnel(t) {
   const f=t.survival_funnel||{stages:[]},stages=(f.stages||[]);
   if(stages.length<2)return wrap(760,220,text(380,110,'Delegation evidence funnel unavailable',{anchor:'middle',size:16,weight:700}),'Delegation evidence funnel');
-  const W=980,H=675,cx=W/2,top=108,stepH=68,gap=10,maxW=760,minW=165,initial=Math.max(1,Number(f.initial_candidates||stages[0]?.survivors||1));
+  const W=1080,cx=465,top=108,stepH=68,gap=10,maxW=760,minW=165,initial=Math.max(1,Number(f.initial_candidates||stages[0]?.survivors||1));
+  const lastBottom=top+(stages.length-1)*(stepH+gap)+stepH;
+  const footerTop=lastBottom+34,footerH=96,H=footerTop+footerH;
   const widthFor=n=>Math.max(minW,maxW*Math.sqrt(Math.max(0,Number(n))/initial));
   const cols=['#0072B2','#56B4E9','#009E73','#E69F00','#6a3d9a','#D55E00','#555'];
   const projectName=f.project_name||t.project?.name||'Current project',cycle=f.research_cycle??t.project?.research_cycle??'-',rev=f.evidence_revision??t.project?.evidence_revision??'-';
@@ -114,11 +116,13 @@ export function figDelegationEvidenceFunnel(t) {
     else body+=`<rect x="${x}" y="${y}" width="${w}" height="${stepH}" rx="7" fill="${fill}" fill-opacity="${st.unavailable?.58:.88}" stroke="#fff" stroke-width="2"/>`;
     const label=st.key==='baseline'?'Candidate pool':st.stage, rate=initial?Number(st.survivors)/initial:0;
     body+=text(cx,y+27,label,{anchor:'middle',size:14,weight:700,fill:st.unavailable?C.ink:'#fff'})+text(cx,y+49,`${st.survivors} survivors · ${pct(rate)}`,{anchor:'middle',size:12,weight:700,fill:st.unavailable?C.mute:'#fff'});
-    if(i>0){const right=x+w+14;body+=text(right,y+24,st.unavailable?'N/A · gate unavailable':`eliminated ${st.eliminated||0}`,{size:11.5,fill:st.unavailable?C.mute:C.bad,weight:700});body+=text(right,y+43,st.unavailable?`carried forward ${st.survivors}`:`pending ${st.pending||0}`,{size:11,fill:C.mute});}
+    if(i>0){const right=x+w+16;body+=text(right,y+24,st.unavailable?'N/A · gate unavailable':`eliminated ${st.eliminated||0}`,{size:11.5,fill:st.unavailable?C.mute:C.bad,weight:700});body+=text(right,y+43,st.unavailable?`carried forward ${st.survivors}`:`pending ${st.pending||0}`,{size:11,fill:C.mute});}
   });
-  body+=text(cx,H-55,`Final strict survivors: ${f.final_survivors??0} / ${f.initial_candidates??0} (${pct(Number(f.final_rate||0))})`,{anchor:'middle',size:14,weight:700});
-  body+=text(cx,H-34,'Strict cumulative PASS: HOLD 및 candidate-level N/A는 생존으로 계산하지 않으며, 전체 layer가 N/A인 경우에만 직전 수를 이월한다.',{anchor:'middle',size:10.5,fill:C.mute});
-  body+=text(cx,H-15,`Source snapshot: current project · Cycle ${cycle} · Evidence r${rev} · ${f.generated_at||t.generated_at||'-'}`,{anchor:'middle',size:9.7,fill:C.mute});
+  body+=`<line x1="90" x2="990" y1="${footerTop-16}" y2="${footerTop-16}" stroke="${C.grid}"/>`;
+  body+=text(cx,footerTop,`Final strict survivors: ${f.final_survivors??0} / ${f.initial_candidates??0} (${pct(Number(f.final_rate||0))})`,{anchor:'middle',size:14,weight:700});
+  body+=text(cx,footerTop+25,'Strict cumulative PASS: HOLD와 candidate-level N/A는 생존으로 계산하지 않습니다.',{anchor:'middle',size:10.5,fill:C.mute});
+  body+=text(cx,footerTop+43,'검증층 전체가 N/A인 경우에만 직전 단계의 생존 후보 수를 그대로 이월합니다.',{anchor:'middle',size:10.5,fill:C.mute});
+  body+=text(cx,footerTop+66,`Source snapshot: current project · Cycle ${cycle} · Evidence r${rev} · ${f.generated_at||t.generated_at||'-'}`,{anchor:'middle',size:9.7,fill:C.mute});
   return wrap(W,H,body,'검증층을 통과하며 축소되는 위임 후보 생존 퍼널');
 }
 

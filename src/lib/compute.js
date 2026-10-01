@@ -4,6 +4,7 @@ import { nowIso, uid, mulberry32, randn, clamp, safeJson, hashString, mean } fro
 import { wilson, normInv } from './stats.js';
 import { loadEmpiricalCalibration, empiricalScenarioFromEpisode } from './empirical.js';
 import { ensureFrozenProtocol, assertProtocolIntegrity } from './rigor.js';
+import { cached } from './memo.js';
 
 const EPS=1e-9;
 const ESTIMATORS=['ema','kalman','changepoint','adaptive'];
@@ -232,7 +233,13 @@ export function sampleDesign(d,max,seed){
   return chosen;
 }
 export async function seedCandidates(env,projectId){
-  const existing=await one(env.DB,`SELECT COUNT(*) n FROM design_candidates WHERE project_id=?`,[projectId]); if(Number(existing?.n||0)>0){await ensureFrozenProtocol(env,projectId);return{created:0};}
+  const existing=await one(env.DB,`SELECT COUNT(*) n FROM design_candidates WHERE project_id=?`,[projectId]); if(Number(existing?.n||0)>0){
+    // 주기적 수집(collect→measure→seed_candidates)마다 buildProtocol(후보 128행+에폭+계수)을 다시 돌리던 경로.
+    // 동결된 프로토콜이 이미 있으면 재구성하지 않는다(무결성은 compute_candidate 에서 검증).
+    const frozen=await one(env.DB,`SELECT 1 x FROM research_protocols WHERE project_id=? LIMIT 1`,[projectId]);
+    if(!frozen) await ensureFrozenProtocol(env,projectId);
+    return{created:0};
+  }
   const def=await latestDefinition(env,projectId); if(!def)throw new Error('definition_missing'); const d={...(def.content.design||{})};
   const mr=await one(env.DB,`SELECT metrics_json FROM measurements WHERE project_id=? ORDER BY measured_at DESC LIMIT 1`,[projectId]);
   const mm=safeJson(mr?.metrics_json,{}),op=mm.operational||{},observedSigma=Number(mm?.pooled?.empirical_sigma);
@@ -249,14 +256,14 @@ export async function seedCandidates(env,projectId){
 }
 async function loadScenarios(env,projectId,phase,cal){
   if(phase==='historical'){
-    const eps=await all(env.DB,`SELECT * FROM empirical_episodes WHERE project_id=? AND peak_outflow IS NOT NULL AND concentration IS NOT NULL AND severity IS NOT NULL ORDER BY year,episode_name`,[projectId]);
+    const eps=await cached(env,projectId,'scn:episodes',()=>all(env.DB,`SELECT * FROM empirical_episodes WHERE project_id=? AND peak_outflow IS NOT NULL AND concentration IS NOT NULL AND severity IS NOT NULL ORDER BY year,episode_name`,[projectId]));
     if(eps.length){const full=eps.length>=Number(cal.profile.panel_n||81);return {scenarios:eps.map(r=>empiricalScenarioFromEpisode(r,cal)),source:full?'empirical_episodes_full':'empirical_episodes_partial',empirical_ready:full,episode_n:eps.length};}
-    const rows=await all(env.DB,`SELECT * FROM scenarios WHERE project_id=? AND scenario_type='historical' ORDER BY name`,[projectId]);
+    const rows=await cached(env,projectId,'scn:user-historical',()=>all(env.DB,`SELECT * FROM scenarios WHERE project_id=? AND scenario_type='historical' ORDER BY name`,[projectId]));
     if(rows.length)return {scenarios:rows.map(r=>scenarioFromRow(r,cal)),source:'user_historical_scenarios',empirical_ready:false,episode_n:0};
     return {scenarios:syntheticScenarios(cal),source:'published_summary_anchor',empirical_ready:false,episode_n:0};
   }
   if(phase==='stress'){
-    const rows=await all(env.DB,`SELECT * FROM scenarios WHERE project_id=? AND scenario_type='adversarial' ORDER BY name`,[projectId]);
+    const rows=await cached(env,projectId,'scn:user-adversarial',()=>all(env.DB,`SELECT * FROM scenarios WHERE project_id=? AND scenario_type='adversarial' ORDER BY name`,[projectId]));
     if(rows.length)return {scenarios:rows.map(r=>scenarioFromRow(r,cal)),source:'user_adversarial_scenarios',empirical_ready:true,episode_n:rows.length};
     const base=paperStressScenarios(cal),boot=calibrationUncertaintyScenarios(cal),loss=lossProxyScenarios(cal),scenarios=[...base,...boot,...loss];
     return {scenarios,source:'paper_wide_40pct_grid+calibration_uncertainty+loss_proxy_sensitivity',empirical_ready:true,episode_n:scenarios.length};
@@ -274,7 +281,7 @@ export async function computeCandidate(env,projectId,candidateId,phase='explorat
   await assertProtocolIntegrity(env,projectId);
   const c=await one(env.DB,`SELECT * FROM design_candidates WHERE id=? AND project_id=?`,[candidateId,projectId]);if(!c)throw new Error('candidate_not_found');
   const def=await latestDefinition(env,projectId);if(!def)throw new Error('definition_missing');const constraints=def.content.constraints,cal=await loadEmpiricalCalibration(env,projectId),config=configFrom(def,env,cal);
-  let reviewer=null;if(phase==='recompute'){const rm=await one(env.DB,`SELECT model_json FROM reviewer_models WHERE project_id=? ORDER BY version DESC LIMIT 1`,[projectId]);reviewer=rm?safeJson(rm.model_json,{}):null;}
+  let reviewer=null;if(phase==='recompute'){const rm=await cached(env,projectId,'reviewer:latest',()=>one(env.DB,`SELECT model_json FROM reviewer_models WHERE project_id=? ORDER BY version DESC LIMIT 1`,[projectId]));reviewer=rm?safeJson(rm.model_json,{}):null;}
   const scenarioPack=await loadScenarios(env,projectId,phase==='recompute'?'confirmation':phase,cal),scenarios=scenarioPack.scenarios; const seed=deterministicSeed(projectId,candidateId,phase,cycle),rng=mulberry32(seed),n=nForPhase(config,phase);
   const batch=emptyAgg(); for(let i=0;i<n;i++){const sc=scenarios[i%scenarios.length];addEpisode(batch,simulateEpisode(c,constraints,rng,sc,reviewer,config),sc.key);}
   let combined=batch; if(['refinement','confirmation'].includes(phase)){const prior=await priorAggregate(env,candidateId,phase);combined=mergeAgg(prior,batch);}
@@ -299,20 +306,30 @@ export async function computeCandidate(env,projectId,candidateId,phase='explorat
 }
 export async function enqueueRobustValidation(env,projectId){
   const cands=await all(env.DB,`SELECT id FROM design_candidates WHERE project_id=? AND status='confirmed_feasible' ORDER BY boundary_score DESC LIMIT 60`,[projectId]);
-  let queued=0;
+  // 후보마다 'SELECT DISTINCT phase' 를 날리던 N+1 루프 → 프로젝트 단위 1회 조회(커버링 인덱스)
+  const doneRows=await all(env.DB,`SELECT DISTINCT candidate_id,phase FROM simulation_runs WHERE project_id=? AND phase IN ('historical','stress')`,[projectId]);
+  const done=new Set(doneRows.map(r=>`${r.candidate_id}|${r.phase}`));
+  const hist=[],stress=[];
   for(const c of cands){
-    const done=await all(env.DB,`SELECT DISTINCT phase FROM simulation_runs WHERE candidate_id=? AND phase IN ('historical','stress')`,[c.id]);
-    const phases=new Set(done.map(x=>x.phase));
-    if(!phases.has('historical')){await enqueue(env,projectId,'compute_candidate',{candidate_id:c.id,phase:'historical',cycle:0},50);queued++;}
-    if(!phases.has('stress')){await enqueue(env,projectId,'compute_candidate',{candidate_id:c.id,phase:'stress',cycle:0},50);queued++;}
+    if(!done.has(`${c.id}|historical`))hist.push({candidate_id:c.id,phase:'historical',cycle:0});
+    if(!done.has(`${c.id}|stress`))stress.push({candidate_id:c.id,phase:'stress',cycle:0});
   }
-  return{queued,candidates:cands.length};
+  // 작업당 INSERT+큐 전송 1회씩 하던 것을 배치로
+  await enqueueMany(env,projectId,'compute_candidate',[...hist,...stress],50);
+  return{queued:hist.length+stress.length,candidates:cands.length};
 }
-export async function computeRegretTable(env,projectId){
+export async function computeRegretTable(env,projectId,preloadedRuns=null){
   const cands=await all(env.DB,`SELECT id FROM design_candidates WHERE project_id=? AND status='confirmed_feasible'`,[projectId]);
-  const rows=[]; for(const c of cands){const runs=await all(env.DB,`SELECT phase,result_json FROM simulation_runs WHERE candidate_id=? AND phase IN ('historical','stress') ORDER BY created_at DESC`,[c.id]);const latest={};for(const r of runs)if(!latest[r.phase])latest[r.phase]=safeJson(r.result_json,{});rows.push({id:c.id,latest});}
+  const confirmedIds=new Set(cands.map(c=>c.id));
+  // 후보마다 simulation_runs 를 따로 조회하던 N+1 루프 → 프로젝트 단위 1회 조회(호출자가 이미 읽었으면 재사용)
+  const runs=preloadedRuns||await all(env.DB,`SELECT candidate_id,phase,result_json FROM simulation_runs WHERE project_id=? AND phase IN ('historical','stress') ORDER BY created_at DESC`,[projectId]);
+  const latestBy=new Map(); for(const r of runs){ if(!confirmedIds.has(r.candidate_id)||(r.phase!=='historical'&&r.phase!=='stress'))continue; let m=latestBy.get(r.candidate_id); if(!m){m={};latestBy.set(r.candidate_id,m);} if(!m[r.phase])m[r.phase]=safeJson(r.result_json,{}); }
+  const rows=cands.map(c=>({id:c.id,latest:latestBy.get(c.id)||{}}));
   const best={}; for(const row of rows)for(const ph of ['historical','stress'])for(const [s,v] of Object.entries(row.latest[ph]?.scenario_scores||{}))best[`${ph}:${s}`]=Math.min(best[`${ph}:${s}`]??Infinity,Number(v.objective));
-  const result=[]; for(const row of rows){let maxRegret=0,meanRegs=[];for(const ph of ['historical','stress'])for(const [s,v] of Object.entries(row.latest[ph]?.scenario_scores||{})){const key=`${ph}:${s}`,reg=Math.max(0,Number(v.objective)-Number(best[key]));maxRegret=Math.max(maxRegret,reg);meanRegs.push(reg);}const avgRegret=mean(meanRegs);await run(env.DB,`UPDATE design_candidates SET max_regret=?,updated_at=? WHERE id=?`,[maxRegret,nowIso(),row.id]);await run(env.DB,`UPDATE simulation_runs SET regret=? WHERE candidate_id=? AND phase IN ('historical','stress')`,[maxRegret,row.id]);result.push({candidate_id:row.id,max_regret:maxRegret,mean_regret:avgRegret});}
+  const result=[],writes=[],ts=nowIso(); for(const row of rows){let maxRegret=0,meanRegs=[];for(const ph of ['historical','stress'])for(const [s,v] of Object.entries(row.latest[ph]?.scenario_scores||{})){const key=`${ph}:${s}`,reg=Math.max(0,Number(v.objective)-Number(best[key]));maxRegret=Math.max(maxRegret,reg);meanRegs.push(reg);}const avgRegret=mean(meanRegs);
+    writes.push(env.DB.prepare(`UPDATE design_candidates SET max_regret=?,updated_at=? WHERE id=?`).bind(maxRegret,ts,row.id),env.DB.prepare(`UPDATE simulation_runs SET regret=? WHERE candidate_id=? AND phase IN ('historical','stress')`).bind(maxRegret,row.id));
+    result.push({candidate_id:row.id,max_regret:maxRegret,mean_regret:avgRegret});}
+  for(let i=0;i<writes.length;i+=50)await env.DB.batch(writes.slice(i,i+50));
   return result.sort((a,b)=>a.max_regret-b.max_regret);
 }
 

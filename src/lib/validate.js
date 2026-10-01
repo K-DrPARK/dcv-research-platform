@@ -9,10 +9,13 @@ function latestPhaseEvidence(rows,phase){
 export async function validateProject(env,projectId){
   const def=await latestDefinition(env,projectId); if(!def)throw new Error('definition_missing');
   const cands=await all(env.DB,`SELECT * FROM design_candidates WHERE project_id=?`,[projectId]);
-  const regret=await computeRegretTable(env,projectId); const regretMap=Object.fromEntries(regret.map(x=>[x.candidate_id,x]));
-  let confirmed=0,boundary=0,rejected=0;
+  // 후보마다 simulation_runs 를 조회하던 N+1 루프(128회) → 1회 조회. 후회표 계산에도 같은 행을 재사용한다.
+  const allRuns=await all(env.DB,`SELECT candidate_id,phase,result_json FROM simulation_runs WHERE project_id=? AND phase IN ('confirmation','historical','stress') ORDER BY created_at DESC`,[projectId]);
+  const runsByCand=new Map(); for(const r of allRuns){ let a=runsByCand.get(r.candidate_id); if(!a){a=[];runsByCand.set(r.candidate_id,a);} a.push(r); }
+  const regret=await computeRegretTable(env,projectId,allRuns); const regretMap=Object.fromEntries(regret.map(x=>[x.candidate_id,x]));
+  let confirmed=0,boundary=0,rejected=0; const inserts=[];
   for(const cand of cands){
-    const runs=await all(env.DB,`SELECT phase,result_json FROM simulation_runs WHERE candidate_id=? AND phase IN ('confirmation','historical','stress') ORDER BY created_at DESC`,[cand.id]);
+    const runs=runsByCand.get(cand.id)||[];
     const conf=latestPhaseEvidence(runs,'confirmation'),hist=latestPhaseEvidence(runs,'historical'),stress=latestPhaseEvidence(runs,'stress');
     let status='HOLD',reason='incomplete';
     if(cand.status==='infeasible'||cand.status==='confirmation_failed'){status='REJECT';reason='pre_robust_failure';}
@@ -24,11 +27,12 @@ export async function validateProject(env,projectId){
       else {status='HOLD';reason='robust_boundary_unresolved';}
     }
     const rg=regretMap[cand.id]||null;
-    await run(env.DB,`INSERT INTO validations(id,project_id,candidate_id,validation_type,status,result_json,created_at) VALUES(?,?,?,?,?,?,?)`,[
+    inserts.push(env.DB.prepare(`INSERT INTO validations(id,project_id,candidate_id,validation_type,status,result_json,created_at) VALUES(?,?,?,?,?,?,?)`).bind(
       uid('val'),projectId,cand.id,'robust',status,JSON.stringify({reason,max_regret:rg?.max_regret??null,mean_regret:rg?.mean_regret??null,confirmation:conf?{classification:conf.classification,metrics:conf.metrics,ci:conf.ci}:null,historical:hist?{classification:hist.classification,metrics:hist.metrics,ci:hist.ci,scenario_scores:hist.scenario_scores}:null,stress:stress?{classification:stress.classification,metrics:stress.metrics,ci:stress.ci,scenario_scores:stress.scenario_scores}:null}),nowIso()
-    ]);
+    ));
     if(status==='CONFIRM')confirmed++; else if(status==='HOLD')boundary++; else rejected++;
   }
+  for(let i=0;i<inserts.length;i+=50)await env.DB.batch(inserts.slice(i,i+50));   // 후보당 개별 INSERT 왕복 → 50건 배치
   const result={confirmed,boundary,rejected,total:cands.length,minimax_candidate:regret[0]||null};
   await audit(env,projectId,'agent','validate.robust.complete','project',projectId,result);
   const rm=await one(env.DB,`SELECT id FROM reviewer_models WHERE project_id=? LIMIT 1`,[projectId]);

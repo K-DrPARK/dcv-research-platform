@@ -1,6 +1,7 @@
 import { all, one, run, audit, enqueue } from './db.js';
 import { nowIso, uid, mulberry32, quantile } from './util.js';
 import { latestDefinition } from './define.js';
+import { bust } from './memo.js';
 
 function metrics(rows){
   const correct=rows.filter(r=>Number(r.ai_correct)===1), wrong=rows.filter(r=>Number(r.ai_correct)===0);
@@ -33,12 +34,15 @@ export async function fitReviewerModel(env,projectId){
   const participantN=new Set(rows.map(r=>String(r.participant_hash||'anon'))).size,correctN=rows.filter(r=>Number(r.ai_correct)===1).length,wrongN=rows.filter(r=>Number(r.ai_correct)===0).length;
   const gate={participants:{observed:participantN,required:minParticipants,pass:participantN>=minParticipants},correct_trials:{observed:correctN,required:minCorrect,pass:correctN>=minCorrect},wrong_trials:{observed:wrongN,required:minWrong,pass:wrongN>=minWrong}};
   if(!Object.values(gate).every(x=>x.pass)){
+    // 새 관측이 들어오기 전에는 같은 판정이 반복되므로, 마지막으로 본 관측 시각을 기록해 advanceProject 가 재시도하지 않게 한다.
+    await run(env.DB,`UPDATE projects SET reviewer_hold_marker=? WHERE id=?`,[rows[0]?.created_at??'',projectId]);
     await audit(env,projectId,'agent','reviewer.fit.hold','project',projectId,{n:rows.length,gate,reason:'human_validation_sample_gate'});
     return {status:'HOLD',n:rows.length,participants:participantN,gate};
   }
   const point=metrics(rows),cluster=clusterBootstrap(rows,B,20260930),model={...point,participants:participantN,cluster_bootstrap:cluster,sample_gate:gate,unit_of_inference:'participant-cluster bootstrap; repeated trials are not treated as independent participants'};
   const ver=await one(env.DB,`SELECT COALESCE(MAX(version),0) v FROM reviewer_models WHERE project_id=?`,[projectId]);
   const id=uid('reviewermodel'); await run(env.DB,`INSERT INTO reviewer_models(id,project_id,version,model_json,created_at) VALUES(?,?,?,?,?)`,[id,projectId,(ver?.v||0)+1,JSON.stringify(model),nowIso()]);
+  bust(env,projectId,'reviewer:latest');
   await audit(env,projectId,'agent','reviewer.fit.complete','reviewer_model',id,model);
   await enqueue(env,projectId,'recompute_project',{},65);
   return {status:'CONFIRM',id,model};

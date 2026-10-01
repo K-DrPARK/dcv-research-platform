@@ -1,4 +1,5 @@
 import { all, one, run, audit } from './db.js';
+import { cached, bust } from './memo.js';
 import { nowIso, uid, clamp, safeJson, mulberry32, quantile as qUtil } from './util.js';
 import { CRISIS_EPISODES } from '../data/crisisEpisodes.js';
 
@@ -124,6 +125,9 @@ export function deriveLossCalibration(rows,horizon=90){
 
 
 export async function ensureEmpiricalProfile(env,projectId){
+  return cached(env,projectId,'emp:profile',()=>ensureEmpiricalProfileUncached(env,projectId));
+}
+async function ensureEmpiricalProfileUncached(env,projectId){
   let p=await one(env.DB,`SELECT * FROM empirical_profiles WHERE project_id=? ORDER BY created_at DESC LIMIT 1`,[projectId]);
   if(p) return p;
   const id=uid('emp'),now=nowIso();
@@ -132,6 +136,7 @@ export async function ensureEmpiricalProfile(env,projectId){
   ]);
   const stmts=PARAMS.map(([key,val,lo,hi,unit,role,prov,note])=>env.DB.prepare(`INSERT INTO empirical_parameters(id,project_id,profile_id,parameter_key,value_num,low_num,high_num,unit,parameter_role,provenance_type,source_note,locked,created_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)`).bind(uid('param'),projectId,id,key,val,lo,hi,unit,role,prov,note,1,now));
   if(stmts.length) await env.DB.batch(stmts);
+  bust(env,projectId);
   await audit(env,projectId,'agent','empirical.profile.seeded','empirical_profile',id,{version:CBDC_PAPER_PROFILE.version,panel:CBDC_PAPER_PROFILE.panel});
   return one(env.DB,`SELECT * FROM empirical_profiles WHERE id=?`,[id]);
 }
@@ -145,6 +150,9 @@ export async function seedBundledEmpiricalPanel(env,projectId){
 }
 
 export async function empiricalReadiness(env,projectId){
+  return cached(env,projectId,'emp:readiness',()=>empiricalReadinessUncached(env,projectId));
+}
+async function empiricalReadinessUncached(env,projectId){
   const profile=await ensureEmpiricalProfile(env,projectId);
   const c=await one(env.DB,`SELECT COUNT(*) n,SUM(CASE WHEN peak_outflow IS NOT NULL AND concentration IS NOT NULL AND severity IS NOT NULL THEN 1 ELSE 0 END) complete,SUM(CASE WHEN provenance_type='verified' THEN 1 ELSE 0 END) verified FROM empirical_episodes WHERE project_id=?`,[projectId]);
   const n=Number(c?.n||0),complete=Number(c?.complete||0),verified=Number(c?.verified||0);
@@ -154,6 +162,9 @@ export async function empiricalReadiness(env,projectId){
 }
 
 export async function loadEmpiricalCalibration(env,projectId){
+  return cached(env,projectId,'emp:calibration',()=>loadEmpiricalCalibrationUncached(env,projectId));
+}
+async function loadEmpiricalCalibrationUncached(env,projectId){
   const profile=await ensureEmpiricalProfile(env,projectId);
   const rows=await all(env.DB,`SELECT parameter_key,value_num,low_num,high_num,parameter_role,provenance_type,source_note FROM empirical_parameters WHERE project_id=? AND profile_id=?`,[projectId,profile.id]);
   const params={}; for(const r of rows) params[r.parameter_key]={value:Number(r.value_num),low:r.low_num==null?null:Number(r.low_num),high:r.high_num==null?null:Number(r.high_num),role:r.parameter_role,provenance:r.provenance_type,source_note:r.source_note};
@@ -186,6 +197,7 @@ export async function importEmpiricalEpisodes(env,projectId,rows=[]){
     ));
   }
   if(stmts.length) await env.DB.batch(stmts);
+  bust(env,projectId);
   const readiness=await empiricalReadiness(env,projectId);
   await audit(env,projectId,'user','empirical.episodes.imported','project',projectId,{inserted:stmts.length,readiness});
   return {inserted:stmts.length,readiness};
@@ -245,6 +257,7 @@ export async function refitEmpiricalCalibration(env,projectId,{promote=false}={}
   const canPromote=promote && result.status==='CONFIRM' && result.n>=Number(profile.panel_n||81);
   await run(env.DB,`INSERT INTO calibration_runs(id,project_id,profile_id,run_type,status,n,result_json,promoted,created_at) VALUES(?,?,?,?,?,?,?,?,?)`,[id,projectId,profile.id,'ols_main_effects',result.status,result.n||0,JSON.stringify(result),canPromote?1:0,nowIso()]);
   if(canPromote) await run(env.DB,`UPDATE calibration_runs SET promoted=0 WHERE project_id=? AND id<>?`,[projectId,id]);
+  bust(env,projectId);
   await audit(env,projectId,'agent','empirical.refit','calibration_run',id,{...result,promoted:canPromote});
   return {id,...result,promoted:canPromote};
 }

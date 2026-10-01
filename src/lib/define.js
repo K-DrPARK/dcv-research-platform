@@ -1,4 +1,5 @@
 import { one, run, audit } from './db.js';
+import { cached, bust } from './memo.js';
 import { aiJson } from './ai.js';
 import { nowIso, uid, safeJson } from './util.js';
 import { ensureEmpiricalProfile, empiricalReadiness } from './empirical.js';
@@ -40,12 +41,16 @@ export async function defineProject(env, projectId){
   await run(env.DB,`INSERT INTO definitions(id,project_id,version,status,content_json,gate_json,ai_note,created_at) VALUES(?,?,?,?,?,?,?,?)`,
     [id,projectId,(last?.v||0)+1,status,JSON.stringify(content),JSON.stringify(gate),JSON.stringify(ai),nowIso()]);
   await run(env.DB,`UPDATE projects SET current_stage=?,status=?,updated_at=? WHERE id=?`,[status==='CONFIRM'?'measure':'define',status.toLowerCase(),nowIso(),projectId]);
+  bust(env,projectId);
   await audit(env,projectId,'agent','define.complete','definition',id,{status,gate});
   return {id,status,gate,content,ai};
 }
 
 export async function latestDefinition(env, projectId){
-  const d=await one(env.DB,`SELECT * FROM definitions WHERE project_id=? ORDER BY version DESC LIMIT 1`,[projectId]);
-  if(!d) return null;
-  return {...d,content:safeJson(d.content_json,{}),gate:safeJson(d.gate_json,{})};
+  // compute_candidate 1건마다(그리고 무결성 검사에서 또 한 번) 조회되던 정의를 isolate 메모로. 저장 시 bust.
+  return cached(env,projectId,'def:latest',async()=>{
+    const d=await one(env.DB,`SELECT * FROM definitions WHERE project_id=? ORDER BY version DESC LIMIT 1`,[projectId]);
+    if(!d) return null;
+    return {...d,content:safeJson(d.content_json,{}),gate:safeJson(d.gate_json,{})};
+  });
 }

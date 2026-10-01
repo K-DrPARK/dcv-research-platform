@@ -2,6 +2,7 @@ import { one, all, run, audit } from './db.js';
 import { latestDefinition } from './define.js';
 import { empiricalReadiness, loadEmpiricalCalibration } from './empirical.js';
 import { nowIso, uid, stableStringify, sha256Hex, safeJson } from './util.js';
+import { cached, bust } from './memo.js';
 
 export async function buildProtocol(env,projectId){
   const def=await latestDefinition(env,projectId); if(!def) throw new Error('definition_missing');
@@ -42,23 +43,33 @@ export async function buildProtocol(env,projectId){
 export async function ensureFrozenProtocol(env,projectId){
   const protocol=await buildProtocol(env,projectId), hash=await sha256Hex(stableStringify(protocol));
   const latest=await one(env.DB,`SELECT * FROM research_protocols WHERE project_id=? ORDER BY version DESC LIMIT 1`,[projectId]);
-  const sims=await one(env.DB,`SELECT COUNT(*) n FROM simulation_runs WHERE project_id=?`,[projectId]);
   if(latest){
     if(latest.protocol_hash===hash) return {...latest,protocol:safeJson(latest.protocol_json,{})};
-    if(Number(sims?.n||0)>0) throw new Error('protocol_drift_after_simulation_start');
+    // 해시가 달라졌을 때만, 그리고 COUNT(*) 대신 존재 여부(LIMIT 1)만 확인한다.
+    const started=await one(env.DB,`SELECT 1 x FROM simulation_runs WHERE project_id=? LIMIT 1`,[projectId]);
+    if(started) throw new Error('protocol_drift_after_simulation_start');
   }
   const version=Number(latest?.version||0)+1,id=uid('protocol'),ts=nowIso();
   await run(env.DB,`INSERT INTO research_protocols(id,project_id,version,definition_version,status,protocol_json,protocol_hash,frozen_at,created_at) VALUES(?,?,?,?,?,?,?,?,?)`,[id,projectId,version,protocol.definition_version,'FROZEN',JSON.stringify(protocol),hash,ts,ts]);
+  bust(env,projectId);
   await audit(env,projectId,'agent','protocol.frozen','research_protocol',id,{version,hash,definition_version:protocol.definition_version});
   return {id,project_id:projectId,version,definition_version:protocol.definition_version,status:'FROZEN',protocol_json:JSON.stringify(protocol),protocol_hash:hash,frozen_at:ts,protocol};
 }
 
+// 무결성 검증(buildProtocol: 후보 128행 + 에폭 패널 + 보정계수 재조회)은 compute_candidate 1건마다 수행되어
+// 작업당 수백 행을 읽었다. 같은 isolate 에서 같은 protocol_hash 를 검증한 지 INTEGRITY_TTL_MS 이내이면 재검증을 건너뛴다.
+// 동결된 해시 자체는 매번 1행(해시 컬럼만)으로 확인하므로 새 프로토콜 버전이 생기면 즉시 재검증된다.
+const INTEGRITY_TTL_MS=10*60*1000;
 export async function assertProtocolIntegrity(env,projectId){
-  const latest=await one(env.DB,`SELECT * FROM research_protocols WHERE project_id=? ORDER BY version DESC LIMIT 1`,[projectId]);
-  if(!latest) return ensureFrozenProtocol(env,projectId);
-  const current=await buildProtocol(env,projectId), hash=await sha256Hex(stableStringify(current));
-  if(hash!==latest.protocol_hash) throw new Error('protocol_integrity_failure');
-  return {...latest,protocol:safeJson(latest.protocol_json,{})};
+  const head=await one(env.DB,`SELECT protocol_hash FROM research_protocols WHERE project_id=? ORDER BY version DESC LIMIT 1`,[projectId]);
+  if(!head) return ensureFrozenProtocol(env,projectId);
+  const ok=await cached(env,projectId,`integrity:${head.protocol_hash}`,async()=>{
+    const latest=await one(env.DB,`SELECT * FROM research_protocols WHERE project_id=? ORDER BY version DESC LIMIT 1`,[projectId]);
+    const current=await buildProtocol(env,projectId), hash=await sha256Hex(stableStringify(current));
+    if(hash!==latest.protocol_hash) throw new Error('protocol_integrity_failure');
+    return {...latest,protocol:safeJson(latest.protocol_json,{})};
+  },INTEGRITY_TTL_MS);
+  return ok;
 }
 
 export async function latestProtocol(env,projectId){

@@ -1,6 +1,6 @@
 {
   "name": "dcv-research-platform",
-  "version": "0.6.2",
+  "version": "0.7.0",
   "private": true,
   "type": "module",
   "scripts": {
@@ -19,7 +19,8 @@
     "predeploy": "node scripts/prepare-lab-code.mjs",
     "redesign:audit": "node scripts/audit-redesign.mjs",
     "lab:bundle": "node scripts/prepare-lab-code.mjs",
-    "lab:test": "node --test tests/lab*.test.mjs"
+    "lab:test": "node --test tests/lab*.test.mjs",
+    "research:actions": "node scripts/actions-runner.mjs"
   },
   "devDependencies": {
     "wrangler": "^4.41.0"

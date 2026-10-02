@@ -180,12 +180,14 @@ async function execute(env,job){
 }
 
 export async function processJobs(env){
+  if(env.COMPUTE_EXECUTOR==='github-actions'&&env.EXTERNAL_RUNTIME!=='github-actions')return [{status:'waiting_for_github_actions'}];
   const jobs=await claimJobs(env,Number(env.MAX_JOBS_PER_TICK||4)); const results=[];
   for(const job of jobs){ try{ const out=await execute(env,job); await finishJob(env,job); results.push({id:job.id,type:job.type,ok:true,out}); } catch(e){ await finishJob(env,job,e); results.push({id:job.id,type:job.type,ok:false,error:String(e)}); } }
   return results;
 }
 
 export async function scheduleAll(env){
+  if(env.COMPUTE_EXECUTOR==='github-actions'&&env.EXTERNAL_RUNTIME!=='github-actions')return {transport:'github-actions',status:'waiting_for_runner'};
   // 완료된 프로젝트는 대상에서 제외(이전: 모든 auto_run 프로젝트에 15분마다 advance + 데이터소스 집계)
   // Two indexed EXISTS probes inside ONE bounded set query replace N per-project reads.
   const ps=await all(env.DB,`SELECT p.id,

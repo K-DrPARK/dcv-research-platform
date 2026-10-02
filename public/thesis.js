@@ -1,5 +1,5 @@
 // 논문 도구: 그림(PNG/SVG) · 표(CSV) · 보고서(Word .docx / Markdown+그림 ZIP / HTML) · 패키지(ZIP) 다운로드, 보고서 미리보기
-import { buildFigures } from './figures.js?v=0.6.2';
+import { buildFigures } from './figures.js?v=0.7.0';
 import { mdToHtml, buildHtmlDocument } from './mdhtml.js';
 import { buildDocx } from './docx.js';
 import { zipStore } from './zip.js';
@@ -87,7 +87,7 @@ async function renderFigCards() {
   } catch (e) { box.innerHTML = `<span class="text-danger small">불러오기 실패: ${esc(e.message)}</span>`; }
 }
 
-async function reportOrAsk() { let md = await loadReportMd(); if (md) return md; if (!confirm('보고서가 아직 없습니다. 지금 생성할까요? (AI 요약 포함, 최대 30초)')) return null; setStatus('보고서 생성 중…'); const r = await (await authFetch(`/api/projects/${D.current()}/report`, { method: 'POST', body: '{}', headers: { 'content-type': 'application/json' } })).json(); return r.content_markdown; }
+async function reportOrAsk() { let md = await loadReportMd(); if (md) return md; if (!confirm('보고서가 아직 없습니다. 지금 생성할까요? (GitHub Actions에서 생성)')) return null; setStatus('보고서 생성 중…'); const r = await (await authFetch(`/api/projects/${D.current()}/report`, { method: 'POST', body: '{}', headers: { 'content-type': 'application/json' } })).json(); if(r.status==='queued'){setStatus('GitHub Actions 생성 대기 · 다음 실행 후 다시 다운로드하세요');D.toast('보고서 생성이 예약되었습니다.');return null;}return r.content_markdown; }
 
 async function renderPngs(figs, scale) {
   const blobs = {}; for (const f of figs) { setStatus(`그림 ${f.n} PNG 변환 중…`); blobs[f.file] = await svgToPngBlob(f.svg, f.width, f.height, scale); } return blobs;
@@ -111,7 +111,7 @@ async function runAction(act, data = {}, btns = []) {
     if (act === 'fig-png' || act === 'fig-svg') { const f = cache.figs.find(x => x.n === Number(data.n)); if (act === 'fig-svg') download(textBlob(f.svg, 'image/svg+xml'), `${f.file}.svg`); else download(await svgToPngBlob(f.svg, f.width, f.height, scale), `${f.file}.png`); }
     else if (act === 'csv') { const r = await authFetch(`/api/projects/${id}/export/${data.name}.csv`); download(await r.blob(), `${data.name}_${stamp()}.csv`); }
     else if (act === 'json') { const { thesis } = await loadThesis(); download(textBlob(JSON.stringify(thesis, null, 2), 'application/json'), `thesis_data_${stamp()}.json`); }
-    else if (act === 'report-regen') { setStatus('보고서 생성 중… (최대 30초)'); await authFetch(`/api/projects/${id}/report`, { method: 'POST', body: '{}', headers: { 'content-type': 'application/json' } }); setStatus('보고서 생성 완료'); await renderFigCards(); }
+    else if (act === 'report-regen') { setStatus('보고서 생성 중… (최대 30초)'); const rr=await (await authFetch(`/api/projects/${id}/report`, { method: 'POST', body: '{}', headers: { 'content-type': 'application/json' } })).json();setStatus(rr.status==='queued'?'GitHub Actions 생성 대기 · 다음 실행 후 확인하세요':'보고서 생성 완료'); await renderFigCards(); }
     else if (['md', 'mdzip', 'html', 'docx'].includes(act)) {
       const md = await reportOrAsk(); if (!md) return; const { thesis, figs } = await loadThesis();
       if (act === 'md') download(textBlob(md, 'text/markdown'), `report_${stamp()}.md`);

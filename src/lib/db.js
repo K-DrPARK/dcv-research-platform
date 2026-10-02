@@ -11,7 +11,7 @@ export async function audit(env, projectId, actor, action, entityType=null, enti
 
 const MAX_QUEUE_DELAY = 43200;   // Cloudflare Queues delaySeconds 상한(12시간)
 async function sendWake(env, bodies, delaySeconds=0) {
-  if (!env.CDRS_QUEUE || !bodies.length) return;
+  if (env.COMPUTE_EXECUTOR==='github-actions' || !env.CDRS_QUEUE || !bodies.length) return;
   const opts = delaySeconds > 0 ? { delaySeconds: Math.min(MAX_QUEUE_DELAY, Math.ceil(delaySeconds)) } : undefined;
   try {
     if (bodies.length === 1) await env.CDRS_QUEUE.send(bodies[0], opts);
@@ -52,7 +52,7 @@ export async function recoverStaleJobs(env, minutes=8) {
   if (Date.now()-lastStaleSweep < 120000) return;   // 큐 메시지마다가 아니라 isolate 당 2분에 1회만 점검
   lastStaleSweep = Date.now();
   const cutoff = new Date(Date.now()-minutes*60000).toISOString();
-  await run(env.DB, `UPDATE jobs SET status=CASE WHEN attempts>=max_attempts THEN 'failed' ELSE 'queued' END, locked_at=NULL, run_after=?, last_error='stale_lock_recovered: worker likely exceeded resource limits', updated_at=? WHERE status='running' AND locked_at IS NOT NULL AND locked_at<?`, [nowIso(), nowIso(), cutoff]);
+  await run(env.DB, `UPDATE jobs SET status=CASE WHEN attempts>=max_attempts THEN 'failed' ELSE 'queued' END, locked_at=NULL, run_after=?, last_error='stale_lock_recovered: lease expired; termination cause unverified', updated_at=? WHERE status='running' AND locked_at IS NOT NULL AND locked_at<?`, [nowIso(), nowIso(), cutoff]);
 }
 
 export async function enqueueMany(env, projectId, type, payloads=[], priority=100) {
@@ -108,4 +108,10 @@ export async function wakeDueJobs(env, limit=10) {
   const rows = await all(env.DB, `SELECT id,project_id,type FROM jobs WHERE status='queued' AND run_after<=? ORDER BY priority ASC, created_at ASC LIMIT ?`, [nowIso(), limit]);
   await sendWake(env, rows.map(r=>({ job_id:r.id, project_id:r.project_id, type:r.type })));
   return rows.length;
+}
+
+export async function enqueueComputeOnce(env,projectId,payload,priority){
+ const id=uid('job'),ts=nowIso(),body=JSON.stringify(payload);
+ const r=await run(env.DB,`INSERT INTO jobs(id,project_id,type,status,priority,payload_json,phase,run_after,created_at,updated_at) SELECT ?,?,'compute_candidate','queued',?,?,?,?,?,? WHERE NOT EXISTS(SELECT 1 FROM jobs WHERE project_id=? AND type='compute_candidate' AND payload_json=? AND status IN ('queued','running','done'))`,[id,projectId,priority,body,payload.phase,ts,ts,ts,projectId,body]);
+ if(r.meta?.changes)await sendWake(env,[{job_id:id,project_id:projectId,type:'compute_candidate'}]);return r.meta?.changes?id:null;
 }

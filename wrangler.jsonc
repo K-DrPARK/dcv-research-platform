@@ -3,13 +3,17 @@
   "name": "dcv-research-platform",
   "main": "src/index.js",
   "compatibility_date": "2026-09-30",
-  "observability": { "enabled": true },
+  "observability": {
+    "enabled": true
+  },
   "assets": {
     "directory": "./public",
     "binding": "ASSETS",
     "run_worker_first": true
   },
-  "ai": { "binding": "AI" },
+  "ai": {
+    "binding": "AI"
+  },
   "d1_databases": [
     {
       "binding": "DB",
@@ -18,14 +22,6 @@
       "migrations_dir": "migrations"
     }
   ],
-  "queues": {
-    "producers": [
-      { "binding": "CDRS_QUEUE", "queue": "dcv-cdrs" }
-    ],
-    "consumers": [
-      { "queue": "dcv-cdrs", "max_batch_size": 1, "max_batch_timeout": 1, "max_retries": 5 }
-    ]
-  },
   "vars": {
     "AI_MODEL": "@cf/meta/llama-3.1-8b-instruct",
     "APP_NAME": "DCV Research Platform",
@@ -35,9 +31,12 @@
     "LAB_AUTO_START": "true",
     "LAB_DEADLINE_AT": "2026-10-30T14:59:59.000Z",
     "LAB_AI_MODEL": "@cf/meta/llama-3.3-70b-instruct-fp8-fast",
-    "SIM_BATCH_SIZE": "180"
+    "SIM_BATCH_SIZE": "180",
+    "COMPUTE_EXECUTOR": "github-actions"
   },
   "triggers": {
-    "crons": ["*/15 * * * *"]
+    "crons": [
+      "*/15 * * * *"
+    ]
   }
 }

@@ -1,4 +1,4 @@
-import { all, one, run, audit, enqueue, enqueueMany, enqueueComputeOnce } from './db.js';
+import { all, one, run, audit, enqueue, enqueueOnce, enqueueMany, enqueueComputeOnce } from './db.js';
 import { latestDefinition } from './define.js';
 import { nowIso, uid, mulberry32, randn, clamp, safeJson, hashString, mean, sha256Hex, stableStringify } from './util.js';
 import { wilson, normInv } from './stats.js';
@@ -271,7 +271,8 @@ export async function seedCandidates(env,projectId){
     // 동결된 프로토콜이 이미 있으면 재구성하지 않는다(무결성은 compute_candidate 에서 검증).
     const frozen=await one(env.DB,`SELECT 1 x FROM research_protocols WHERE project_id=? AND research_cycle=? LIMIT 1`,[projectId,cycle]);
     if(!frozen) await ensureFrozenProtocol(env,projectId);
-    return{created:0};
+    await enqueueOnce(env,projectId,'advance_project',{},5);
+    return{created:0,resume_requested:true};
   }
   const def=await latestDefinition(env,projectId); if(!def)throw new Error('definition_missing'); const d={...(def.content.design||{})};
   const mr=await one(env.DB,`SELECT metrics_json FROM measurements WHERE project_id=? ORDER BY measured_at DESC LIMIT 1`,[projectId]);

@@ -1,19 +1,29 @@
-수정 원인 및 적용
+원인 및 수정
 
-1. 보고서 POST는 Actions 생성 대기(202)를 반환하지만 기존 UI는 markdown이 있다고 가정하여 기존 내용을 비우고 AI 실패로 표시했습니다. 대기 처리·30초 화면 내 상태 조회·기존 내용 보존으로 수정했습니다.
-2. 최신 evidence revision으로 보고서를 조회하면 기존 보고서가 제외되었습니다. 이전 보고서를 명시적인 스냅샷 경고와 함께 제공하며 최신 revision으로 잘못 표시하지 않습니다.
-3. 자동 보고서가 최종 승인 뒤에만 예약되었습니다. 승인 전 진행 보고서도 예약하며 진행 중 작업을 중복 등록하지 않습니다.
-4. 참가자 집계는 현재 규약·주기에 부합하는 관측만 포함했습니다. 누적 고유 참가자와 관측, 현재 분석 대상, 제외 관측을 분리하여 과거 참여 기록을 보존하고 표시합니다. 기존 비통제 자료를 새 실험의 검증 자료로 승격하지 않습니다.
+UNEVALUATED 208은 후보가 모두 제약을 위반했다는 뜻이 아니라 아직 평가되지 않았다는 뜻입니다. CONFIRMED, BOUNDARY, INFEASIBLE이 모두 0이고 프로토콜 해시·검증 결과가 없는 상태는 계산 파이프라인 정체와 부합합니다. 운영 D1/Actions 상세 로그를 직접 확인하지 못했으므로 실제 정체 지점을 단정하지 않습니다.
 
-변경 파일
-- public/app.js
-- src/index.js
-- src/lib/thesis.js
-- src/lib/report.js
+소스 확인 및 수정:
+- 기존 후보가 있어 seedCandidates가 반환할 때 advance 복구 작업을 등록하도록 수정.
+- 미평가 후보가 있는 연구의 advance 복구 우선순위를 높이고 기존 queued 작업에도 반영.
+- 후보 계산 중 정기 수집 신규 예약을 미뤄 제한된 실행 예산의 계산 우선권 확보. 최초 수집·이미 등록된 수집은 삭제하지 않음.
+- API 예산이 큰 collector보다 작은 compute를 실행할 수 있도록 용량에 맞는 작업 선택.
+- 계산 결과가 추가되면 같은 revision의 이전 보고서도 다시 생성 예약.
+- Actions 완료 로그에 남은 작업/후보 상태를 포함하고 work_remaining을 명시. workflow 성공과 연구 완료를 구분.
+- 전원 미평가일 때 제약조건을 재검토하라는 오도 문구를 계산 대기로 수정.
+- 미검증층의 208 survivors/100% 표시를 unverified/PASS unavailable로 수정.
+
+검증: 145개 중 142개 테스트 통과, 3개 건너뜀, 실패 0. 208개 실제 후보를 사용하는 통합 테스트에서 누락 작업 복구, 프로토콜 해시 생성, 208개 exploration 시뮬레이션 저장 및 미평가 0건 확인. 테스트 반복 수는 작게 사전 설정한 시험용이며 논문 결과로 제공하지 않음. Worker dry-run 통과.
+
+적용: 이 ZIP은 직전 v0.7.4에 추가 적용할 변경 파일만 포함합니다. 저장소 반영 후 Worker 배포 및 GitHub Actions 실행이 필요합니다. 운영 배포/재계산은 이 작업에서 실행하지 않았습니다.
+
+N/A는 결과 없음입니다. Synthetic은 독립 확증 계산, Historical은 역사적 패널 계산, Adversarial은 스트레스 계산이 저장되어야 합니다. BIS/ECB는 공식 자료 매핑이 준비되어야 하며 Human은 현재 규약·주기의 표본 게이트 및 재계산이 필요합니다. 실제 자료가 없는 층을 통과 처리하거나 제약/표본 기준을 낮추지 않습니다. 최종 학술 승인은 별도의 사람 승인입니다.
+
+수정 파일:
+- src/lib/compute.js
+- src/lib/db.js
 - src/lib/orchestrator.js
+- src/lib/report.js
 - src/lib/lab_code_bundle.js
-- tests/report_human_scope.test.mjs
-
-검증: 143개 테스트 중 140개 통과, 3개 건너뜀, 실패 0. Wrangler 배포 dry-run 통과. 신규 회귀 테스트: 과거 참가자 60명 기록 보존, 승인 전 보고서 예약과 중복 방지, 대기 응답 시 내용 보존, 이전 revision 보고서 표시.
-
-적용: ZIP 파일을 저장소에 덮어쓰고 Worker 배포와 GitHub Actions를 실행하십시오. DB migration이나 데이터 삭제는 없습니다. 운영 D1을 직접 조사하지 않았으므로 실제 데이터 삭제 여부 및 60명 참여 실적 자체는 미확인입니다. 이 패치는 확인된 소스 집계·표시 오류를 수정합니다.
+- public/figures.js
+- scripts/actions-runner.mjs
+- tests/compute_recovery.test.mjs

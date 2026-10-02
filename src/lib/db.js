@@ -70,7 +70,12 @@ export async function enqueueMany(env, projectId, type, payloads=[], priority=10
 
 export async function claimJobs(env, limit=4) {
   await recoverStaleJobs(env);
-  const jobs = await all(env.DB, `SELECT * FROM jobs WHERE status='queued' AND run_after<=? ORDER BY priority ASC, created_at ASC LIMIT ?`, [nowIso(), limit]);
+  const remaining=env.EXTERNAL_RUNTIME==='github-actions'&&typeof env.DB.remaining==='number'?env.DB.remaining:1000000;
+  // An oversized collector must not block smaller compute jobs behind it.
+  const jobs = await all(env.DB, `SELECT * FROM jobs WHERE status='queued' AND run_after<=?
+    AND CASE type WHEN 'collect_project' THEN 180 WHEN 'generate_report' THEN 100 WHEN 'advance_project' THEN 90 ELSE 60 END<=?
+    ORDER BY priority ASC, created_at ASC LIMIT ?`, [nowIso(), remaining, limit]);
+  if(!jobs.length&&remaining<180){const waiting=await one(env.DB,`SELECT 1 x FROM jobs WHERE status='queued' AND run_after<=? LIMIT 1`,[nowIso()]);if(waiting)env.RUNNER_BUDGET_DEFERRED=true;}
   const claimed=[];
   for (const j of jobs) {
     const needed=j.type==='collect_project'?180:j.type==='generate_report'?100:j.type==='advance_project'?90:60;

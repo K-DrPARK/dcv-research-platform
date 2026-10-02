@@ -23,7 +23,7 @@ export function checklist(t) {
   if (pn.n && pn.estimated / pn.n > 0.5) items.push(`위기 사례 ${pn.n}건 중 reconstructed 자료가 ${pn.estimated}건(${pct(pn.estimated / pn.n, 0)})입니다. 결과는 이 재구성 규칙에 조건부임을 본문과 표에 유지하십시오.`);
   if (t.empirical.readiness !== 'FULL_EPISODE_PANEL') items.push(`실증 패널이 완전하지 않습니다(${t.empirical.complete_rows}/${t.empirical.target_rows}).`);
   if(c.by_class.unevaluated)items.push(`미평가 후보 ${c.by_class.unevaluated}개: 연산 완료 전 진행 보고서이며 최종 연구결과가 아닙니다.`);
-  if (!c.by_class.confirmed) items.push('CONFIRMED 후보가 없습니다. 제약조건 또는 설계공간을 재검토해야 합니다.');
+  if (!c.by_class.confirmed) items.push(c.by_class.unevaluated===c.total && c.total>0?'모든 후보가 미평가입니다. CONFIRMED 0은 제약 위반의 결과가 아니라 계산 대기 상태입니다. Actions의 compute_candidate 실행 및 저장 결과를 확인해야 합니다.':'CONFIRMED 후보가 없습니다. 계산된 후보의 제약별 판정과 미평가·보류 수를 먼저 확인하십시오.');
   if (!t.reproducibility.protocol?.hash) items.push('확증 분석 전에 동결된 연구 프로토콜 해시가 없습니다.');
   if (lc?.identification_status==='PROXY_ONLY') items.push('FP/FN 비용은 직접 관측된 사회적 비용이 아니라 peak-outflow 기반 경험적 proxy입니다. 직접 비용 추정치로 표현하지 마십시오.');
   if (t.approval?.decision==='COMPUTATIONALLY_CONFIRMED') items.push('플랫폼의 자동 판정은 계산적 확인(COMPUTATIONALLY_CONFIRMED)입니다. 최종 학술적 승인에는 PI/심사자 수동 sign-off가 필요합니다.');

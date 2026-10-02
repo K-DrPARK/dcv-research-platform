@@ -21,7 +21,15 @@ export async function runActions(env,{seconds=90,maxJobs=20,maxCalls=250}={}){
   }
   if(typeof env.DB.remaining==='number'&&env.DB.remaining<60)env.RUNNER_BUDGET_DEFERRED=true;
   if(!env.RUNNER_BUDGET_DEFERRED&&env.AI&&Date.now()-started<(seconds-50)*1000&&env.DB.calls<maxCalls-100){await heartbeatRunner(env,token);const lab=await scheduleLab(env);if(lab.error)failures++;}
-  return {status:failures?'completed_with_job_errors':env.RUNNER_BUDGET_DEFERRED?'budget_deferred':'completed',jobs:completed,failures,d1_api_calls:env.DB.calls,elapsed_seconds:Math.round((Date.now()-started)/1000)};
+  let progress=null;
+  if(typeof env.DB.remaining!=='number'||env.DB.remaining>0){
+   const result=await env.DB.batch([
+    env.DB.prepare(`SELECT j.type,j.phase,j.status,COUNT(*) n FROM jobs j WHERE j.status IN ('queued','running','failed') GROUP BY j.type,j.phase,j.status`),
+    env.DB.prepare(`SELECT c.status,COUNT(*) n FROM design_candidates c JOIN projects p ON p.id=c.project_id WHERE c.research_cycle=p.research_cycle GROUP BY c.status`)
+   ]);progress={jobs:result[0].results||[],candidates:result[1].results||[]};
+  }
+  const pending=progress?.jobs.some(j=>j.status==='queued'||j.status==='running');
+  return {status:failures?'completed_with_job_errors':env.RUNNER_BUDGET_DEFERRED?'budget_deferred':pending?'work_remaining':'completed',jobs:completed,failures,progress,d1_api_calls:env.DB.calls,elapsed_seconds:Math.round((Date.now()-started)/1000)};
  }catch(error){if(error.message==='runner_api_budget_exhausted')return {status:'budget_deferred',jobs:completed,failures,d1_api_calls:env.DB.calls};primaryError=error;error.stage||='processing_jobs';throw error;}finally{try{if(env.DB.withControl)await env.DB.withControl(()=>releaseRunner(env,token,completed-failures));else await releaseRunner(env,token,completed-failures);}catch(error){if(primaryError)console.error(JSON.stringify({...safeDiagnostic(error),stage:'release_runner_lease'}));else{error.stage='release_runner_lease';throw error;}}}
 }
 async function main(){

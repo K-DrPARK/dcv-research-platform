@@ -117,8 +117,8 @@ export function figDelegationEvidenceFunnel(t) {
     if(i<stages.length-1){const nx=cx-w2/2;body+=`<path d="M ${x} ${y} L ${x+w} ${y} L ${nx+w2} ${yn} L ${nx} ${yn} Z" fill="${fill}" fill-opacity="${st.unavailable?.58:.88}" stroke="#fff" stroke-width="2"/>`;}
     else body+=`<rect x="${x}" y="${y}" width="${w}" height="${stepH}" rx="7" fill="${fill}" fill-opacity="${st.unavailable?.58:.88}" stroke="#fff" stroke-width="2"/>`;
     const label=st.key==='baseline'?'Candidate pool':st.stage, rate=initial?Number(st.survivors)/initial:0;
-    body+=text(cx,y+27,label,{anchor:'middle',size:14,weight:700,fill:st.unavailable?C.ink:'#fff'})+text(cx,y+49,`${st.survivors} survivors · ${pct(rate)}`,{anchor:'middle',size:12,weight:700,fill:st.unavailable?C.mute:'#fff'});
-    if(i>0){const right=x+w+16;body+=text(right,y+24,st.unavailable?'N/A · gate unavailable':`eliminated ${st.eliminated||0}`,{size:11.5,fill:st.unavailable?C.mute:C.bad,weight:700});body+=text(right,y+43,st.unavailable?`carried forward ${st.survivors}`:`pending ${st.pending||0}`,{size:11,fill:C.mute});}
+    body+=text(cx,y+27,label,{anchor:'middle',size:14,weight:700,fill:st.unavailable?C.ink:'#fff'})+text(cx,y+49,st.unavailable?`${st.total} unverified · PASS unavailable`:`${st.survivors} survivors · ${pct(rate)}`,{anchor:'middle',size:12,weight:700,fill:st.unavailable?C.mute:'#fff'});
+    if(i>0){const right=x+w+16;body+=text(right,y+24,st.unavailable?'N/A · gate unavailable':`eliminated ${st.eliminated||0}`,{size:11.5,fill:st.unavailable?C.mute:C.bad,weight:700});body+=text(right,y+43,st.unavailable?`awaiting actual validation`:`pending ${st.pending||0}`,{size:11,fill:C.mute});}
   });
   body+=`<line x1="90" x2="990" y1="${footerTop-16}" y2="${footerTop-16}" stroke="${C.grid}"/>`;
   body+=text(cx,footerTop,`Final strict survivors: ${f.final_survivors??0} / ${f.initial_candidates??0} (${pct(Number(f.final_rate||0))})`,{anchor:'middle',size:14,weight:700});

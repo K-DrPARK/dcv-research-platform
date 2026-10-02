@@ -11,17 +11,18 @@ export async function runActions(env,{seconds=90,maxJobs=20,maxCalls=250}={}){
  try{
   // Set-level scheduling; one claimed job at a time. The same immutable protocol/seed engine runs here.
   await heartbeatRunner(env,token);
-  const initial=await scheduleAll(env);
+  const initial=await scheduleAll(env,{process:false});
   const first=Array.isArray(initial)?initial:[];
   completed+=first.length;failures+=first.filter(r=>!r.ok).length;
-  while(Date.now()-started<seconds*1000&&completed<maxJobs&&env.DB.calls<maxCalls-80){
+  while(Date.now()-started<seconds*1000&&completed<maxJobs&&(typeof env.DB.remaining==='number'?env.DB.remaining>=60:env.DB.calls<maxCalls-80)){
    await heartbeatRunner(env,token);
    const results=await processJobs(env);if(!results.length)break;
-   completed+=results.length;failures+=results.filter(r=>!r.ok).length;
+   completed+=results.filter(r=>!r.deferred).length;failures+=results.filter(r=>!r.ok&&!r.deferred).length;if(results.some(r=>r.deferred)){env.RUNNER_BUDGET_DEFERRED=true;break;}
   }
-  if(env.AI&&Date.now()-started<(seconds-50)*1000&&env.DB.calls<maxCalls-100){await heartbeatRunner(env,token);const lab=await scheduleLab(env);if(lab.error)failures++;}
-  return {status:failures?'completed_with_job_errors':'completed',jobs:completed,failures,d1_api_calls:env.DB.calls,elapsed_seconds:Math.round((Date.now()-started)/1000)};
- }catch(error){primaryError=error;error.stage||='processing_jobs';throw error;}finally{try{await releaseRunner(env,token,completed-failures);}catch(error){if(primaryError)console.error(JSON.stringify({...safeDiagnostic(error),stage:'release_runner_lease'}));else{error.stage='release_runner_lease';throw error;}}}
+  if(typeof env.DB.remaining==='number'&&env.DB.remaining<60)env.RUNNER_BUDGET_DEFERRED=true;
+  if(!env.RUNNER_BUDGET_DEFERRED&&env.AI&&Date.now()-started<(seconds-50)*1000&&env.DB.calls<maxCalls-100){await heartbeatRunner(env,token);const lab=await scheduleLab(env);if(lab.error)failures++;}
+  return {status:failures?'completed_with_job_errors':env.RUNNER_BUDGET_DEFERRED?'budget_deferred':'completed',jobs:completed,failures,d1_api_calls:env.DB.calls,elapsed_seconds:Math.round((Date.now()-started)/1000)};
+ }catch(error){if(error.message==='runner_api_budget_exhausted')return {status:'budget_deferred',jobs:completed,failures,d1_api_calls:env.DB.calls};primaryError=error;error.stage||='processing_jobs';throw error;}finally{try{if(env.DB.withControl)await env.DB.withControl(()=>releaseRunner(env,token,completed-failures));else await releaseRunner(env,token,completed-failures);}catch(error){if(primaryError)console.error(JSON.stringify({...safeDiagnostic(error),stage:'release_runner_lease'}));else{error.stage='release_runner_lease';throw error;}}}
 }
 async function main(){
  let stage='load_configuration';try{
@@ -32,6 +33,7 @@ async function main(){
  const DB=createD1Rest(credentials);
  stage='preflight_d1';await preflightD1(DB);console.log('D1 preflight OK: connection and required tables verified.');
  const env={...cfg.vars,DB,COMPUTE_EXECUTOR:'github-actions',EXTERNAL_RUNTIME:'github-actions',MAX_JOBS_PER_TICK:'1',RUNNER_CODE_REVISION:process.env.GITHUB_SHA||'local',ECOS_API_KEY:process.env.ECOS_API_KEY,OPENFISCAL_API_KEY:process.env.OPENFISCAL_API_KEY,BOJO_API_KEY:process.env.BOJO_API_KEY,FDIC_API_KEY:process.env.FDIC_API_KEY};
+ env.RUNNER_JOB_OBSERVER=(type,stage)=>console.log(JSON.stringify({stage,job_type:type,d1_api_calls:DB.calls}));
  if(CF_AI_API_TOKEN)env.AI={run:async(model,input)=>{
   const r=await fetch(`https://api.cloudflare.com/client/v4/accounts/${CF_ACCOUNT_ID}/ai/run/${model}`,{method:'POST',headers:{authorization:`Bearer ${CF_AI_API_TOKEN}`,'content-type':'application/json'},body:JSON.stringify(input),signal:AbortSignal.timeout(55000)});
   const j=await r.json();if(!r.ok||j.success===false)throw new Error(`Workers AI REST failed (${r.status})`);return j.result;

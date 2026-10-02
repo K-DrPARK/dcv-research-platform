@@ -182,11 +182,11 @@ async function execute(env,job){
 export async function processJobs(env){
   if(env.COMPUTE_EXECUTOR==='github-actions'&&env.EXTERNAL_RUNTIME!=='github-actions')return [{status:'waiting_for_github_actions'}];
   const jobs=await claimJobs(env,Number(env.MAX_JOBS_PER_TICK||4)); const results=[];
-  for(const job of jobs){ try{ const out=await execute(env,job); await finishJob(env,job); results.push({id:job.id,type:job.type,ok:true,out}); } catch(e){ await finishJob(env,job,e); results.push({id:job.id,type:job.type,ok:false,error:String(e)}); } }
+  for(const job of jobs){ env.RUNNER_JOB_OBSERVER?.(job.type,'job_started');try{ const out=await execute(env,job); await finishJob(env,job);env.RUNNER_JOB_OBSERVER?.(job.type,'job_completed'); results.push({id:job.id,type:job.type,ok:true,out}); } catch(e){ if(e.message==='runner_api_budget_exhausted'&&env.DB.withControl){await env.DB.withControl(()=>run(env.DB,`UPDATE jobs SET status='queued',locked_at=NULL,attempts=MAX(0,attempts-1),run_after=?,updated_at=?,last_error='deferred_api_budget' WHERE id=?`,[new Date().toISOString(),new Date().toISOString(),job.id]));results.push({id:job.id,type:job.type,ok:null,deferred:true});break;} await finishJob(env,job,e); results.push({id:job.id,type:job.type,ok:false,error:String(e)}); } }
   return results;
 }
 
-export async function scheduleAll(env){
+export async function scheduleAll(env,{process=true}={}){
   if(env.COMPUTE_EXECUTOR==='github-actions'&&env.EXTERNAL_RUNTIME!=='github-actions')return {transport:'github-actions',status:'waiting_for_runner'};
   // 완료된 프로젝트는 대상에서 제외(이전: 모든 auto_run 프로젝트에 15분마다 advance + 데이터소스 집계)
   // Two indexed EXISTS probes inside ONE bounded set query replace N per-project reads.
@@ -205,5 +205,5 @@ export async function scheduleAll(env){
   // 끝난 job 정리는 하루 4회(UTC 0/6/12/18시 첫 Cron)만 — 전용 인덱스를 두면 매 job 상태 변경마다 쓰기가 늘어난다.
   { const t=new Date(); if(t.getUTCHours()%6===0 && t.getUTCMinutes()<15){ try{ await pruneJobs(env); }catch(_){} } }
   if(env.CDRS_QUEUE){ const woke=await wakeDueJobs(env); return {scheduled:ps.length,woke,transport:'cloudflare-queue'}; }
-  return processJobs(env);
+  return process?processJobs(env):{scheduled:ps.length,transport:'github-actions'};
 }

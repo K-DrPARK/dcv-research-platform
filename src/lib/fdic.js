@@ -1,5 +1,5 @@
 import { all, one, run, audit } from './db.js';
-import { nowIso, uid } from './util.js';
+import { nowIso, uid, safeJson } from './util.js';
 
 const BASE='https://api.fdic.gov/banks';
 const PAGE_LIMIT=10000;
@@ -114,16 +114,25 @@ export async function confirmFdicLink(env,projectId,{episode_id,episode_name,cer
   return {episode_id:ep.id,episode_name:ep.episode_name,cert:c,status:'confirmed'};
 }
 
+
+async function writeFdicRows(db,table,columns,rows,conflict){
+ let changed=0;
+ for(let i=0;i<rows.length;i+=500){
+  const r=await run(db,`INSERT INTO ${table}(${columns.join(',')}) SELECT ${columns.map((_,j)=>`json_extract(value,'$[${j}]')`).join(',')} FROM json_each(?) WHERE 1 ${conflict}`,[JSON.stringify(rows.slice(i,i+500))]);
+  changed+=Number(r.meta?.changes||0);
+ }
+ return changed;
+}
+
 async function collectFinancialForLink(env,projectId,link){
   const y=Number(link.year); if(!Number.isFinite(y)||y<1992)return {inserted:0,skipped:'financials_before_1992'};
   const filters=`CERT:${link.cert} AND REPDTE:[${qDate(y-1,1,1)} TO ${qDate(y,12,31)}]`;
   const r=await fdicFetch(env,'financials',{filters,sort_by:'REPDTE',sort_order:'ASC',limit:1000},{maxPages:4});
-  let inserted=0; const now=nowIso();
+  let inserted=0; const now=nowIso(),writes=[];
   for(const row0 of r.rows){ const row=unwrap(row0),rep=String(pick(row,['REPDTE','repdte'])||''); if(!rep)continue;
-    const rr=await run(env.DB,`INSERT INTO fdic_financial_observations(id,project_id,episode_id,cert,repdte,asset,deposits_total,deposits_domestic,uninsured_deposits,equity,payload_json,fetched_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(project_id,cert,repdte) DO UPDATE SET episode_id=excluded.episode_id,asset=excluded.asset,deposits_total=excluded.deposits_total,deposits_domestic=excluded.deposits_domestic,uninsured_deposits=excluded.uninsured_deposits,equity=excluded.equity,payload_json=excluded.payload_json,fetched_at=excluded.fetched_at WHERE fdic_financial_observations.payload_json<>excluded.payload_json`,[
-      uid('fdicfin'),projectId,link.episode_id,link.cert,rep,toNum(pick(row,['ASSET','asset'])),toNum(pick(row,['DEP','DEPOSITS','dep'])),toNum(pick(row,['DEPDOM','depdom'])),toNum(pick(row,['DEPUNINS','UNINSDEP','depunins'])),toNum(pick(row,['EQ','EQV','EQTOT','equity'])),JSON.stringify(row),now]);
-    inserted+=Number(rr.meta?.changes||0)>0?1:0;
+    writes.push([uid('fdicfin'),projectId,link.episode_id,link.cert,rep,toNum(pick(row,['ASSET','asset'])),toNum(pick(row,['DEP','DEPOSITS','dep'])),toNum(pick(row,['DEPDOM','depdom'])),toNum(pick(row,['DEPUNINS','UNINSDEP','depunins'])),toNum(pick(row,['EQ','EQV','EQTOT','equity'])),JSON.stringify(row),now]);
   }
+  inserted=await writeFdicRows(env.DB,'fdic_financial_observations','id,project_id,episode_id,cert,repdte,asset,deposits_total,deposits_domestic,uninsured_deposits,equity,payload_json,fetched_at'.split(','),writes,'ON CONFLICT(project_id,cert,repdte) DO UPDATE SET episode_id=excluded.episode_id,asset=excluded.asset,deposits_total=excluded.deposits_total,deposits_domestic=excluded.deposits_domestic,uninsured_deposits=excluded.uninsured_deposits,equity=excluded.equity,payload_json=excluded.payload_json,fetched_at=excluded.fetched_at WHERE fdic_financial_observations.payload_json<>excluded.payload_json');
   const summary=summarizeFinancialRows(r.rows);
   return {inserted,rows:r.rows.length,total:r.total,truncated:r.truncated,summary};
 }
@@ -133,14 +142,13 @@ async function collectSodForLink(env,projectId,link,{marketHhi=true}={}){
   const target=await fdicFetch(env,'sod',{filters:`CERT:${link.cert} AND YEAR:${y}`,limit:10000},{maxPages:4});
   const now=nowIso(); let inserted=0;
   const targetRows=target.rows.map(unwrap);
-  const stateTotals={};
+  const stateTotals={},writes=[];
   for(const row of targetRows){
     const dep=toNum(pick(row,['DEPSUMBR','DEPOSITS','dep'])); const state=String(pick(row,['STALPBR','STALP','state'])||'').toUpperCase(); if(state&&Number.isFinite(dep))stateTotals[state]=(stateTotals[state]||0)+dep;
     const key=rowKey(row)||`${y}|${link.cert}|${uid('row')}`;
-    const rr=await run(env.DB,`INSERT INTO fdic_sod_observations(id,project_id,episode_id,cert,year,branch_num,uninumber,state,county,cbsa,branch_deposits,payload_json,fetched_at,row_key) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(project_id,row_key) DO UPDATE SET episode_id=excluded.episode_id,branch_deposits=excluded.branch_deposits,payload_json=excluded.payload_json,fetched_at=excluded.fetched_at WHERE fdic_sod_observations.payload_json<>excluded.payload_json`,[
-      uid('fdicsod'),projectId,link.episode_id,link.cert,y,String(pick(row,['BRNUM','brnum'])||''),String(pick(row,['UNINUMBR','uninumber'])||''),state,String(pick(row,['CNTYNAMB','COUNTY','county'])||''),String(pick(row,['CBSA','MSA_NO','cbsa'])||''),dep,JSON.stringify(row),now,key]);
-    inserted+=Number(rr.meta?.changes||0)>0?1:0;
+    writes.push([uid('fdicsod'),projectId,link.episode_id,link.cert,y,String(pick(row,['BRNUM','brnum'])||''),String(pick(row,['UNINUMBR','uninumber'])||''),state,String(pick(row,['CNTYNAMB','COUNTY','county'])||''),String(pick(row,['CBSA','MSA_NO','cbsa'])||''),dep,JSON.stringify(row),now,key]);
   }
+  inserted=await writeFdicRows(env.DB,'fdic_sod_observations','id,project_id,episode_id,cert,year,branch_num,uninumber,state,county,cbsa,branch_deposits,payload_json,fetched_at,row_key'.split(','),writes,'ON CONFLICT(project_id,row_key) DO UPDATE SET episode_id=excluded.episode_id,branch_deposits=excluded.branch_deposits,payload_json=excluded.payload_json,fetched_at=excluded.fetched_at WHERE fdic_sod_observations.payload_json<>excluded.payload_json');
   const primaryState=Object.entries(stateTotals).sort((a,b)=>b[1]-a[1])[0]?.[0]||null;
   let metric=null;
   if(marketHhi&&primaryState){
@@ -161,17 +169,21 @@ export async function collectFdicSource(env,projectId,source){
   const links=await all(env.DB,`SELECT l.*,e.year,e.episode_name FROM fdic_episode_links l JOIN empirical_episodes e ON e.id=l.episode_id WHERE l.project_id=? AND l.match_status='confirmed' ORDER BY e.year,e.episode_name`,[projectId]);
   if(!links.length)return {inserted:0,linked:0,warning:'no_confirmed_fdic_episode_links'};
   let inserted=0,details=[],errors=[];
-  for(const link of links){
+  const offset=Math.max(0,Math.min(links.length-1,Number(safeJson(source.mapping_json,{}).fdic_cursor||0)));
+  const selected=links.slice(offset,offset+(env.EXTERNAL_RUNTIME==='github-actions'?1:2));
+  for(const link of selected){
     try{
       const r=source.kind==='fdic_sod'?await collectSodForLink(env,projectId,link):await collectFinancialForLink(env,projectId,link);
       inserted+=Number(r.inserted||0); details.push({episode:link.episode_name,cert:link.cert,...r});
     }catch(e){errors.push({episode:link.episode_name,cert:link.cert,error:String(e.message||e)});}
   }
+  const next=offset+selected.length,partial=!errors.length&&next<links.length,nextCursor=errors.length?offset:partial?next:0;
+  await run(env.DB,`UPDATE data_sources SET mapping_json=json_set(COALESCE(mapping_json,'{}'),'$.fdic_cursor',?),last_fetched_at=? WHERE id=?`,[nextCursor,partial?null:nowIso(),source.id]);
   await audit(env,projectId,'agent',`fdic.collect.${source.kind}`,'data_source',source.id,{linked:links.length,inserted,errors:errors.length});
   let reverification=null;
   try{ reverification=await buildFdicReverificationRankings(env,projectId); }
   catch(e){ errors.push({scope:'reverification_ranking',error:String(e.message||e)}); }
-  return {inserted,linked:links.length,details,errors,reverification};
+  return {inserted,linked:links.length,processed:selected.length,partial,next_cursor:nextCursor,details,errors,reverification};
 }
 
 export async function enableFdicConnectors(env,projectId){
@@ -226,6 +238,7 @@ export async function buildFdicReverificationRankings(env,projectId){
   }
   provisional.sort((a,b)=>(b.discrepancy_score??-1)-(a.discrepancy_score??-1) || (a.provenance_type==='verified'?1:0)-(b.provenance_type==='verified'?1:0) || a.episode_name.localeCompare(b.episode_name));
   const now=nowIso(); let rank=0;
+  const priorIds=new Map((await all(env.DB,`SELECT episode_id,id FROM fdic_reverification_rankings WHERE project_id=?`,[projectId])).map(x=>[x.episode_id,x.id])),rankingWrites=[];
   for(const x of provisional){
     if(Number.isFinite(x.discrepancy_score))rank++;
     const score=x.discrepancy_score;
@@ -235,12 +248,13 @@ export async function buildFdicReverificationRankings(env,projectId){
     if(Number.isFinite(x.deposit_gap))reasons.push(`deposit dynamics Δ=${x.deposit_gap.toFixed(4)} (FDIC peak drawdown vs panel peak_outflow; diagnostic proxy)`);
     if(x.provenance_type!=='verified')reasons.push('reconstructed episode: primary-source reverification has higher evidentiary value');
     if(x.financial_points!=null&&x.financial_points<4)reasons.push('limited quarterly Financials coverage');
-    const existing=await one(env.DB,`SELECT id FROM fdic_reverification_rankings WHERE project_id=? AND episode_id=?`,[projectId,x.episode_id]);
-    await run(env.DB,`INSERT INTO fdic_reverification_rankings(id,project_id,episode_id,cert,rank_num,priority_level,discrepancy_score,original_concentration,fdic_hhi,concentration_gap,concentration_percentile,original_peak_outflow,fdic_peak_drawdown,deposit_gap,deposit_percentile,financial_points,peak_drawdown_date,provenance_type,methodology_version,reason_json,created_at,updated_at)
+    const existing={id:priorIds.get(x.episode_id)};
+    rankingWrites.push(env.DB.prepare(`INSERT INTO fdic_reverification_rankings(id,project_id,episode_id,cert,rank_num,priority_level,discrepancy_score,original_concentration,fdic_hhi,concentration_gap,concentration_percentile,original_peak_outflow,fdic_peak_drawdown,deposit_gap,deposit_percentile,financial_points,peak_drawdown_date,provenance_type,methodology_version,reason_json,created_at,updated_at)
       VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?, 'FDIC-REVERIFY-v1',?,?,?)
-      ON CONFLICT(project_id,episode_id) DO UPDATE SET cert=excluded.cert,rank_num=excluded.rank_num,priority_level=excluded.priority_level,discrepancy_score=excluded.discrepancy_score,original_concentration=excluded.original_concentration,fdic_hhi=excluded.fdic_hhi,concentration_gap=excluded.concentration_gap,concentration_percentile=excluded.concentration_percentile,original_peak_outflow=excluded.original_peak_outflow,fdic_peak_drawdown=excluded.fdic_peak_drawdown,deposit_gap=excluded.deposit_gap,deposit_percentile=excluded.deposit_percentile,financial_points=excluded.financial_points,peak_drawdown_date=excluded.peak_drawdown_date,provenance_type=excluded.provenance_type,reason_json=excluded.reason_json,updated_at=excluded.updated_at`,[
-      existing?.id||uid('fdicrank'),projectId,x.episode_id,x.cert,Number.isFinite(score)?rank:null,priority,score,x.concentration,x.fdic_hhi,x.concentration_gap,x.concentration_percentile,x.peak_outflow,x.fdic_peak_drawdown,x.deposit_gap,x.deposit_percentile,x.financial_points,x.peak_drawdown_date,x.provenance_type,JSON.stringify({reasons,comparability:{concentration:'state-market HHI is a validation covariate, not an automatic replacement for thesis C',deposit:'maximum quarterly peak-to-trough drawdown over episode year-1 through episode year is a diagnostic proxy, not the same measurement window as peak_outflow'}}),now,now]);
+      ON CONFLICT(project_id,episode_id) DO UPDATE SET cert=excluded.cert,rank_num=excluded.rank_num,priority_level=excluded.priority_level,discrepancy_score=excluded.discrepancy_score,original_concentration=excluded.original_concentration,fdic_hhi=excluded.fdic_hhi,concentration_gap=excluded.concentration_gap,concentration_percentile=excluded.concentration_percentile,original_peak_outflow=excluded.original_peak_outflow,fdic_peak_drawdown=excluded.fdic_peak_drawdown,deposit_gap=excluded.deposit_gap,deposit_percentile=excluded.deposit_percentile,financial_points=excluded.financial_points,peak_drawdown_date=excluded.peak_drawdown_date,provenance_type=excluded.provenance_type,reason_json=excluded.reason_json,updated_at=excluded.updated_at`).bind(
+      existing?.id||uid('fdicrank'),projectId,x.episode_id,x.cert,Number.isFinite(score)?rank:null,priority,score,x.concentration,x.fdic_hhi,x.concentration_gap,x.concentration_percentile,x.peak_outflow,x.fdic_peak_drawdown,x.deposit_gap,x.deposit_percentile,x.financial_points,x.peak_drawdown_date,x.provenance_type,JSON.stringify({reasons,comparability:{concentration:'state-market HHI is a validation covariate, not an automatic replacement for thesis C',deposit:'maximum quarterly peak-to-trough drawdown over episode year-1 through episode year is a diagnostic proxy, not the same measurement window as peak_outflow'}}),now,now));
   }
+  for(let i=0;i<rankingWrites.length;i+=50)await env.DB.batch(rankingWrites.slice(i,i+50));
   await audit(env,projectId,'agent','fdic.reverification.ranked','empirical_episode',null,{episodes:provisional.length,ranked:rank,methodology:'FDIC-REVERIFY-v1'});
   return getFdicReverificationRankings(env,projectId);
 }

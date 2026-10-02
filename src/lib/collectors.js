@@ -22,7 +22,7 @@ function normalizeRows(source, body, contentType){
 }
 
 export async function collectProject(env, projectId,{dueOnly=false}={}){
-  const sources=await all(env.DB, `SELECT * FROM data_sources WHERE project_id=? AND enabled=1 ${dueOnly?"AND (last_fetched_at IS NULL OR datetime(last_fetched_at, '+' || cadence_minutes || ' minutes') <= datetime('now'))":''} ORDER BY last_fetched_at,id LIMIT 2`, [projectId]);
+  const sources=await all(env.DB, `SELECT * FROM data_sources WHERE project_id=? AND enabled=1 ${dueOnly?"AND (last_fetched_at IS NULL OR datetime(last_fetched_at, '+' || cadence_minutes || ' minutes') <= datetime('now'))":''} ORDER BY last_fetched_at,id LIMIT ${env.EXTERNAL_RUNTIME==='github-actions'?1:2}`, [projectId]);
   let inserted=0, empiricalRows=0, errors=[];
   for(const s of sources){
     try{
@@ -33,7 +33,7 @@ export async function collectProject(env, projectId,{dueOnly=false}={}){
         const fr=await collectFdicSource(env,projectId,s);
         inserted+=Number(fr.inserted||0);
         if(fr.errors?.length) errors.push(...fr.errors.map(x=>({source:s.name,...x})));
-        await run(env.DB,`UPDATE data_sources SET last_fetched_at=?,last_status=? WHERE id=?`,[nowIso(),fr.errors?.length?`partial:${fr.errors.length}`:'ok',s.id]);
+        await run(env.DB,`UPDATE data_sources SET last_fetched_at=?,last_status=? WHERE id=?`,[fr.partial?null:nowIso(),fr.partial?'partial:resume_next_tick':fr.errors?.length?`partial:${fr.errors.length}`:'ok',s.id]);
         continue;
       }
       const headers=safeJson(s.headers_json,{});

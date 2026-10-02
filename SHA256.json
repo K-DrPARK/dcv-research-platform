@@ -1,10 +1,15 @@
 {
-  "scripts/actions-runner.mjs": "01560d86a866a7fb12384ca1a799d9c17d968182bc62a338b38ec293cb257018",
-  "scripts/lib/d1-rest.mjs": "247b808885135548161ef62355ebd751c5cc4cc15ed608788531c5cadf032ce0",
-  "scripts/lib/runner-diagnostics.mjs": "a18a30f3abbc18434cc5229f46358b9bcb7dad087a236fef1f6788d291feb84e",
-  "scripts/prepare-lab-code.mjs": "92b2757af0bb3112dc1dc5b8a9b08ca1e60c15af5682256836888ca8c8954ecc",
-  "src/lib/lab_code_bundle.js": "8531a35ef82ed433a0949348126b7cd7ae7b2ff898b563a90e078bdf44800c1f",
-  "tests/actions_diagnostics.test.mjs": "ba97af51efe683a981989612f1845a39ba92998e2474d0cf87b96fa8191783f1",
-  "docs/actions-diagnostics-0.7.1.md": "3cbf5a18eb035fb38cdefabf3f90f47ad81d5243fc31575f3be7c2df9e8c361a",
-  "docs/actions-diagnostics-changed-files.md": "427dfa7ee780e4187b6d5a895633d17e4810e6688b8daa5db2494e909988788a"
+  "scripts/actions-runner.mjs": "d69e82a517f4559719d41294ca05c10a6fe0d3c1c93f99c65db350c149e64867",
+  "scripts/lib/d1-rest.mjs": "40ab0742a56a1e2804dd82a371a0f1178c301f1f0ee76bcceacde5ce213b8faa",
+  "src/lib/db.js": "f879f04a9619c7ee16c92206c46da1f3119ee066a2a487dd37766f7710965f49",
+  "src/lib/orchestrator.js": "adbf77a24b8603b2201359b3afc3abb18be4ae4b7e330ad1fcdda1aa366978e0",
+  "src/lib/fdic.js": "20228aa970110ecf40dd2e2f22bca320f795c6e8e0f9dfe2feb030bf508b8031",
+  "src/lib/collectors.js": "2988365dae1bc1e4ab3add38d28543ef3887b1da337d356fc5adb9eb8ef1ff0a",
+  "src/lib/util.js": "4289c8ad6e9e37cca7d76bebfd329a5dde448ea8cce5bc1cb02faee3cd9969d0",
+  "src/lib/lab_code_bundle.js": "9abc29c229b4f9c1031d7999d0173111b10bb7b6e60eb49081bc5d0251b44170",
+  "package.json": "5ac5d8ccb6a598f016b171e39b7c2fd07247e217f25566dfb4640698c9a4580b",
+  "package-lock.json": "9e5aaab802dce949bb3b8f3010cb2a82ab0766d411f265e447489d4f740dad42",
+  "tests/actions_budget.test.mjs": "da153c1ec7581e3c74dfd21ade01f8788cdeb94e68b813e311bf13210ceb686d",
+  "docs/actions-budget-0.7.2.md": "7f880004f3b3b2f651d760ce71e21b5dfa3b18db5fb5d6a5e44863d13aa7ee43",
+  "docs/actions-budget-changed-files.md": "3647743f239f35ceade38112069ed1820ae48338c4cab1053bdfa170c64ed016"
 }

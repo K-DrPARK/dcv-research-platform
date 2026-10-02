@@ -73,6 +73,8 @@ export async function claimJobs(env, limit=4) {
   const jobs = await all(env.DB, `SELECT * FROM jobs WHERE status='queued' AND run_after<=? ORDER BY priority ASC, created_at ASC LIMIT ?`, [nowIso(), limit]);
   const claimed=[];
   for (const j of jobs) {
+    const needed=j.type==='collect_project'?180:j.type==='generate_report'?100:j.type==='advance_project'?90:60;
+    if(env.EXTERNAL_RUNTIME==='github-actions'&&typeof env.DB.remaining==='number'&&env.DB.remaining<needed){env.RUNNER_BUDGET_DEFERRED=true;break;}
     const r = await run(env.DB, `UPDATE jobs SET status='running', locked_at=?, attempts=attempts+1, updated_at=? WHERE id=? AND status='queued'`, [nowIso(), nowIso(), j.id]);
     if ((r.meta?.changes || 0) > 0) claimed.push({...j, attempts:(j.attempts||0)+1});
   }

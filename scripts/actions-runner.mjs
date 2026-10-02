@@ -33,7 +33,7 @@ async function main(){
  const DB=createD1Rest(credentials);
  stage='preflight_d1';await preflightD1(DB);console.log('D1 preflight OK: connection and required tables verified.');
  const env={...cfg.vars,DB,COMPUTE_EXECUTOR:'github-actions',EXTERNAL_RUNTIME:'github-actions',MAX_JOBS_PER_TICK:'1',RUNNER_CODE_REVISION:process.env.GITHUB_SHA||'local',ECOS_API_KEY:process.env.ECOS_API_KEY,OPENFISCAL_API_KEY:process.env.OPENFISCAL_API_KEY,BOJO_API_KEY:process.env.BOJO_API_KEY,FDIC_API_KEY:process.env.FDIC_API_KEY};
- env.RUNNER_JOB_OBSERVER=(type,stage)=>console.log(JSON.stringify({stage,job_type:type,d1_api_calls:DB.calls}));
+ env.RUNNER_JOB_OBSERVER=(type,stage,error)=>console.log(JSON.stringify({stage,job_type:type,d1_api_calls:DB.calls,...(error?{diagnostic:safeDiagnostic(error)}:{})}));
  if(CF_AI_API_TOKEN)env.AI={run:async(model,input)=>{
   const r=await fetch(`https://api.cloudflare.com/client/v4/accounts/${CF_ACCOUNT_ID}/ai/run/${model}`,{method:'POST',headers:{authorization:`Bearer ${CF_AI_API_TOKEN}`,'content-type':'application/json'},body:JSON.stringify(input),signal:AbortSignal.timeout(55000)});
   const j=await r.json();if(!r.ok||j.success===false)throw new Error(`Workers AI REST failed (${r.status})`);return j.result;

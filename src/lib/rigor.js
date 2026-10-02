@@ -51,8 +51,10 @@ export async function ensureFrozenProtocol(env,projectId){
     const started=await one(env.DB,`SELECT 1 x FROM simulation_runs r JOIN design_candidates c ON c.id=r.candidate_id WHERE r.project_id=? AND c.research_cycle=? LIMIT 1`,[projectId,cycle]);
     if(started) throw new Error('protocol_drift_after_simulation_start');
   }
-  const version=Number(latest?.version||0)+1,id=uid('protocol'),ts=nowIso();
-  await run(env.DB,`INSERT INTO research_protocols(id,project_id,version,definition_version,status,protocol_json,protocol_hash,frozen_at,created_at,research_cycle) VALUES(?,?,?,?,?,?,?,?,?,?)`,[id,projectId,version,protocol.definition_version,'FROZEN',JSON.stringify(protocol),hash,ts,ts,cycle]);
+  const id=uid('protocol'),ts=nowIso();
+  // UNIQUE(project_id,version) spans every research cycle. Allocate within the INSERT to avoid races.
+  const inserted=await one(env.DB,`INSERT INTO research_protocols(id,project_id,version,definition_version,status,protocol_json,protocol_hash,frozen_at,created_at,research_cycle) SELECT ?,?,COALESCE(MAX(version),0)+1,?,?,?,?,?,?,? FROM research_protocols WHERE project_id=? RETURNING version`,[id,projectId,protocol.definition_version,'FROZEN',JSON.stringify(protocol),hash,ts,ts,cycle,projectId]);
+  const version=Number(inserted.version);
   bust(env,projectId);
   await audit(env,projectId,'agent','protocol.frozen','research_protocol',id,{version,hash,definition_version:protocol.definition_version});
   return {id,project_id:projectId,version,definition_version:protocol.definition_version,status:'FROZEN',protocol_json:JSON.stringify(protocol),protocol_hash:hash,frozen_at:ts,protocol};

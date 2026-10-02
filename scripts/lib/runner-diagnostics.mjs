@@ -9,13 +9,14 @@ export function diagnoseD1(status,json){
  if(status===401||status===403){code='D1_AUTHORIZATION_FAILED';message='Check CF_D1_API_TOKEN permissions and its Cloudflare account scope.';}
  else if(status===404){code='D1_DATABASE_NOT_FOUND';message='Check CF_ACCOUNT_ID and CF_D1_DATABASE_ID point to the same account/database.';}
  else if(status===429){code='D1_RATE_LIMITED';message='Cloudflare rate limit reached; rerun after backoff.';}
+ else if(errors.some(e=>/UNIQUE constraint failed:\s*research_protocols\.project_id,\s*research_protocols\.version/i.test(String(e.message||'')))){code='PROTOCOL_VERSION_CONFLICT';message='Protocol version collided across research cycles. Apply the protocol version allocation fix.';}
  else if(missing){code='D1_SCHEMA_MISSING';message=`Missing database ${missing[1]}: ${missing[2]}. Apply remote migrations to the platform DB.`;}
  return new RunnerError(code,message,{http_status:status,cloudflare_codes:codes});
 }
 export function safeDiagnostic(error){
  if(error instanceof RunnerError)return {code:error.code,message:error.safeMessage,...error.details,stage:error.stage||'unknown'};
  const message=String(error?.message||'');
- const known={runner_api_budget_exhausted:['API_BUDGET_EXHAUSTED','Runner API budget exhausted; remaining work will resume later.'],external_runner_lease_lost:['RUNNER_LEASE_LOST','Runner lease expired or is owned by another run.']};
+ const known={protocol_drift_after_simulation_start:['PROTOCOL_DRIFT','Frozen protocol changed after simulation started; inspect the research cycle and evidence change.'],protocol_integrity_failure:['PROTOCOL_INTEGRITY_FAILURE','Current inputs no longer match the frozen protocol.'],definition_missing:['DEFINITION_MISSING','The project needs a definition before candidates can be seeded.'],runner_api_budget_exhausted:['API_BUDGET_EXHAUSTED','Runner API budget exhausted; remaining work will resume later.'],external_runner_lease_lost:['RUNNER_LEASE_LOST','Runner lease expired or is owned by another run.']};
  const [code,text]=known[message]||['RUNNER_UNEXPECTED_ERROR','Unexpected runner error. Raw messages, SQL parameters, and response bodies are withheld.'];
  return {code,message:text,stage:error?.stage||'unknown',error_type:['SyntaxError','TypeError','AbortError','TimeoutError'].includes(error?.name)?error.name:'Error'};
 }

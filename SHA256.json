@@ -1,15 +1,10 @@
 {
-  "scripts/actions-runner.mjs": "d69e82a517f4559719d41294ca05c10a6fe0d3c1c93f99c65db350c149e64867",
-  "scripts/lib/d1-rest.mjs": "40ab0742a56a1e2804dd82a371a0f1178c301f1f0ee76bcceacde5ce213b8faa",
-  "src/lib/db.js": "f879f04a9619c7ee16c92206c46da1f3119ee066a2a487dd37766f7710965f49",
-  "src/lib/orchestrator.js": "adbf77a24b8603b2201359b3afc3abb18be4ae4b7e330ad1fcdda1aa366978e0",
-  "src/lib/fdic.js": "20228aa970110ecf40dd2e2f22bca320f795c6e8e0f9dfe2feb030bf508b8031",
-  "src/lib/collectors.js": "2988365dae1bc1e4ab3add38d28543ef3887b1da337d356fc5adb9eb8ef1ff0a",
-  "src/lib/util.js": "4289c8ad6e9e37cca7d76bebfd329a5dde448ea8cce5bc1cb02faee3cd9969d0",
-  "src/lib/lab_code_bundle.js": "9abc29c229b4f9c1031d7999d0173111b10bb7b6e60eb49081bc5d0251b44170",
-  "package.json": "5ac5d8ccb6a598f016b171e39b7c2fd07247e217f25566dfb4640698c9a4580b",
-  "package-lock.json": "9e5aaab802dce949bb3b8f3010cb2a82ab0766d411f265e447489d4f740dad42",
-  "tests/actions_budget.test.mjs": "da153c1ec7581e3c74dfd21ade01f8788cdeb94e68b813e311bf13210ceb686d",
-  "docs/actions-budget-0.7.2.md": "7f880004f3b3b2f651d760ce71e21b5dfa3b18db5fb5d6a5e44863d13aa7ee43",
-  "docs/actions-budget-changed-files.md": "3647743f239f35ceade38112069ed1820ae48338c4cab1053bdfa170c64ed016"
+  "src/lib/rigor.js": "62728bdf957c407d86914dd88cdd6d93d55e44030fd61a316b21dd35b0edde0d",
+  "src/lib/orchestrator.js": "0d53182a0ccee03852f949d2896e1eb16604766b16029fa7ae4560e094a648e9",
+  "scripts/actions-runner.mjs": "d4eebf48c06a19d3aa891a1fd13ca40e236ee53f9e5afec7f3289b8bf26b178f",
+  "scripts/lib/runner-diagnostics.mjs": "9815283f005bf76817ef6f6535f9d5eb2e7d70aedb7f80875a609fd7c4c15e54",
+  "src/lib/lab_code_bundle.js": "63114a00ef2c49f05ddfd33896cc46a55630181b46e562c68607b6d8960905fa",
+  "tests/helpers/d1shim.mjs": "aa199a79cdc58d72bf2492bec6995c771ae8af76a0aa16ea83bfb750ad5e499c",
+  "tests/protocol_cycle_version.test.mjs": "4da462a7ffe6db189233d1eca2ad759129b379495034514240f3e73c841c95d5",
+  "docs/protocol-version-0.7.3.md": "aa0a0fa08aac94c27f3fb4e1cbf94e39c7cf563213960925d30cd2fa834ebc7d"
 }

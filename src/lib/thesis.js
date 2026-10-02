@@ -8,7 +8,8 @@ import { fdicStatus, getFdicReverificationRankings } from './fdic.js';
 import { officialSourceStatus } from './official_sources.js';
 
 const CLASS_SQL = `CASE
-  WHEN c.status='confirmed_feasible' OR EXISTS(SELECT 1 FROM validations v WHERE v.candidate_id=c.id AND v.validation_type='human_recompute' AND v.status='CONFIRM') THEN 'confirmed'
+  WHEN c.status='pending' THEN 'unevaluated'
+  WHEN c.status='confirmed_feasible' OR EXISTS(SELECT 1 FROM validations v WHERE v.candidate_id=c.id AND v.validation_type='human_recompute' AND v.status='CONFIRM' AND v.evidence_revision=(SELECT evidence_revision FROM projects WHERE id=c.project_id)) THEN 'confirmed'
   WHEN c.evidence_status='UNRESOLVED' OR c.status IN ('boundary_hold','unresolved') THEN 'boundary'
   WHEN c.status='provisionally_feasible' THEN 'provisional' ELSE 'infeasible' END`;
 const PHASE_RANK = { confirmation: 4, refinement: 3, exploration: 2, historical: 1, stress: 1 };
@@ -103,7 +104,7 @@ export async function buildThesisData(env, projectId) {
   const metricOf = id => { const r = best.get(id); return r ? { phase: r.phase, n: r.n, loss_mean: r4(r.loss_mean), loss_exceed_rate: r4(r.loss_exceed_rate), fp_rate: r4(r.fp_rate), fn_rate: r4(r.fn_rate), review_burden: r4(r.review_burden), recovery_time: r4(r.recovery_time), regret: r4(r.regret) } : null; };
   for (const c of cands) c.metrics = metricOf(c.id);
 
-  const byClass = { confirmed: 0, boundary: 0, provisional: 0, infeasible: 0 };
+  const byClass = { unevaluated: 0, confirmed: 0, boundary: 0, provisional: 0, infeasible: 0 };
   for (const c of cands) byClass[c.klass] = (byClass[c.klass] || 0) + 1;
 
   const dims = {}; for (const [name, key] of DIMS) dims[name] = levelTable(cands, key === 'authority_k' ? 'K' : key === 'delay_d' ? 'd' : key === 'recovery_w' ? 'W' : key === 'adjust_m' ? 'm' : key);
@@ -222,8 +223,9 @@ export async function buildThesisData(env, projectId) {
     order:FUNNEL_ORDER.map(([key,stage])=>({key,stage})),
     stages:funnelStages,
     initial_candidates:cands.length,
-    final_survivors:strictPool.length,
-    final_rate:cands.length?strictPool.length/cands.length:0,
+    evaluated_layers:funnelStages.filter(x=>x.key!=='baseline'&&!x.unavailable).length,
+    final_survivors:funnelStages.some(x=>x.key!=='baseline'&&!x.unavailable)?strictPool.length:0,
+    final_rate:cands.length&&funnelStages.some(x=>x.key!=='baseline'&&!x.unavailable)?strictPool.length/cands.length:0,
     method:'STRICT_CUMULATIVE_PASS_v1',
     basis:'CURRENT_PROJECT_ONLY',
     project_id:projectId,
@@ -334,3 +336,4 @@ export async function exportCsv(env, projectId, name) {
   }
 }
 export const EXPORT_NAMES = ['candidates', 'simulation_runs', 'validations', 'reviewer_observations', 'episodes', 'fdic_links', 'fdic_financials', 'fdic_sod', 'fdic_market_metrics', 'fdic_reverification', 'fdic_reverification_reviews', 'official_observations', 'official_sync_runs', 'official_mappings', 'validation_matrix', 'audit_log'];
+

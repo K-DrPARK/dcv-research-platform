@@ -1,5 +1,5 @@
 // 논문 도구: 그림(PNG/SVG) · 표(CSV) · 보고서(Word .docx / Markdown+그림 ZIP / HTML) · 패키지(ZIP) 다운로드, 보고서 미리보기
-import { buildFigures } from './figures.js';
+import { buildFigures } from './figures.js?v=0.6.2';
 import { mdToHtml, buildHtmlDocument } from './mdhtml.js';
 import { buildDocx } from './docx.js';
 import { zipStore } from './zip.js';

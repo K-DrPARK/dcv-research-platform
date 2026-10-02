@@ -1,0 +1,18 @@
+# v0.6.2 수정 파일
+
+- [src/index.js](D:/dcv/src/index.js)
+- [src/lib/orchestrator.js](D:/dcv/src/lib/orchestrator.js)
+- [src/lib/compute.js](D:/dcv/src/lib/compute.js)
+- [src/lib/thesis.js](D:/dcv/src/lib/thesis.js)
+- [src/lib/report.js](D:/dcv/src/lib/report.js)
+- [src/lib/util.js](D:/dcv/src/lib/util.js)
+- [src/lib/lab_code_bundle.js](D:/dcv/src/lib/lab_code_bundle.js)
+- [public/app.js](D:/dcv/public/app.js)
+- [public/figures.js](D:/dcv/public/figures.js)
+- [public/thesis.js](D:/dcv/public/thesis.js)
+- [public/index.html](D:/dcv/public/index.html)
+- [package.json](D:/dcv/package.json)
+- [package-lock.json](D:/dcv/package-lock.json)
+- [migrations/0020_job_candidate_recovery.sql](D:/dcv/migrations/0020_job_candidate_recovery.sql)
+- [tests/pipeline_recovery.test.mjs](D:/dcv/tests/pipeline_recovery.test.mjs)
+- [docs/pipeline-recovery-0.6.2.md](D:/dcv/docs/pipeline-recovery-0.6.2.md)

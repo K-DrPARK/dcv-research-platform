@@ -1,0 +1,15 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import {makeDb} from './helpers/d1shim.mjs';
+import {seedProject} from './helpers/seed.mjs';
+import {advanceProject,scheduleAll} from '../src/lib/orchestrator.js';
+import {buildThesisData} from '../src/lib/thesis.js';
+import {generateReport} from '../src/lib/report.js';
+import {enqueueRobustValidation} from '../src/lib/compute.js';
+import {buildFigures} from '../public/figures.js';
+async function pending(n=3){const DB=makeDb(),id=await seedProject(DB,{candidates:n,reviewer:0,episodes:0});DB.raw.exec("DELETE FROM simulation_runs; DELETE FROM validations; DELETE FROM approvals; UPDATE design_candidates SET status='pending',evidence_status='PENDING'; UPDATE projects SET status='report_ready',reviewer_hold_marker='';");return {DB,id};}
+test('premature report cannot stop pending research; recovery freezes protocol and queues once',async()=>{const {DB,id}=await pending();const env={DB};let r=await advanceProject(env,id);assert.equal(r.queued,3);assert.equal(DB.raw.prepare("SELECT status FROM projects").get().status,'running');assert.equal(DB.raw.prepare("SELECT COUNT(*) n FROM research_protocols WHERE status='FROZEN'").get().n,1);r=await advanceProject(env,id);assert.equal(r.waiting,'jobs_in_flight');assert.equal(DB.raw.prepare("SELECT COUNT(*) n FROM jobs WHERE type='compute_candidate'").get().n,3);});
+test('unevaluated candidates do not become failures or 100 percent survivors; preview remains running',async()=>{const {DB,id}=await pending();const t=await buildThesisData({DB},id);assert.equal(t.candidates.by_class.unevaluated,3);assert.equal(t.candidates.by_class.infeasible,0);assert.equal(t.survival_funnel.final_survivors,0);assert.equal(t.survival_funnel.final_rate,0);const report=await generateReport({DB},id);assert.equal(report.draft,true);assert.equal(DB.raw.prepare('SELECT status FROM projects').get().status,'running');assert.doesNotMatch(report.markdown,/가장 높았다/);});
+test('Figures 6 and 7 always resolve into readable SVG even before any evidence',()=>{for(const n of [6,7]){const f=buildFigures({}).find(f=>f.n===n);assert.ok(f);assert.equal(f.render_status,'ok');assert.match(f.svg,/대기/);assert.doesNotMatch(f.svg,/NaN|undefined/);}});
+test('robust scheduling continues beyond first 60 confirmed candidates',async()=>{const DB=makeDb(),id=await seedProject(DB,{candidates:65,reviewer:0,episodes:0});DB.raw.exec("UPDATE design_candidates SET status='confirmed_feasible'; INSERT INTO simulation_runs(id,project_id,candidate_id,phase,seed,n,result_json,created_at) SELECT 'h_'||id,project_id,id,'historical',1,1,'{}',datetime('now') FROM design_candidates WHERE CAST(substr(id,6) AS INTEGER)<60; INSERT INTO simulation_runs(id,project_id,candidate_id,phase,seed,n,result_json,created_at) SELECT 's_'||id,project_id,id,'stress',1,1,'{}',datetime('now') FROM design_candidates WHERE CAST(substr(id,6) AS INTEGER)<60;");const r=await enqueueRobustValidation({DB},id);assert.equal(r.candidates,5);assert.equal(r.queued,10);});
+

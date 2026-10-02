@@ -1,4 +1,5 @@
-import { claimJobs, finishJob, enqueue, enqueueOnce, pruneJobs, wakeDueJobs, all, one, run, audit } from './db.js';
+import { claimJobs, finishJob, enqueue, enqueueOnce, enqueueMany, pruneJobs, wakeDueJobs, all, one, run, audit } from './db.js';
+import { ensureFrozenProtocol } from './rigor.js';
 import { defineProject } from './define.js';
 import { collectProject } from './collectors.js';
 import { measureProject } from './measure.js';
@@ -34,12 +35,17 @@ export async function advanceProject(env,projectId){
   const p=await one(env.DB,`SELECT * FROM projects WHERE id=?`,[projectId]);
   if(!p||!p.auto_run) return {status:'disabled'};
   // 보고서까지 끝난 프로젝트: 이후 단계 점검 쿼리(전체 스캔 포함)를 전부 생략
-  if(TERMINAL_STATUSES.has(p.status)) return {stage:'complete'};
+  if(TERMINAL_STATUSES.has(p.status)) {
+    const pending=await one(env.DB,`SELECT 1 x FROM design_candidates WHERE project_id=? AND research_cycle=? AND status='pending' LIMIT 1`,[projectId,Number(p.research_cycle||1)]);
+    if(!pending)return {stage:'complete'};
+    await run(env.DB,`UPDATE projects SET status='running',reviewer_hold_marker=NULL WHERE id=?`,[projectId]);
+    p.reviewer_hold_marker=null;
+  }
 
   // 인간 검토자 표본을 기다리는 중(마지막 fit_reviewer 가 HOLD 였고 그 뒤 새 관측이 없음)이면,
   // 앞 단계(후보/시뮬레이션/검증) 점검을 반복할 필요가 없다. 마커는 모든 앞 단계가 끝난 뒤에만 기록된다.
   if(p.reviewer_hold_marker!==null && p.reviewer_hold_marker!==undefined){
-    const model=await one(env.DB,`SELECT 1 x FROM reviewer_models WHERE project_id=? AND research_cycle=? AND evidence_revision=? LIMIT 1`,[projectId,Number(p.research_cycle||1),Number(p.evidence_revision||0)]);
+    const model=await one(env.DB,`SELECT 1 x FROM reviewer_models WHERE project_id=? AND research_cycle=? AND evidence_revision=? UNION ALL SELECT 1 x FROM design_candidates WHERE project_id=? AND research_cycle=? AND status='pending' LIMIT 1`,[projectId,Number(p.research_cycle||1),Number(p.evidence_revision||0),projectId,Number(p.research_cycle||1)]);
     if(!model){
       const latest=await one(env.DB,`SELECT created_at FROM reviewer_observations WHERE project_id=? ORDER BY created_at DESC LIMIT 1`,[projectId]);
       if((latest?.created_at??'')===p.reviewer_hold_marker) return {stage:'human_review',waiting:'no_new_reviewer_observations'};
@@ -67,7 +73,16 @@ export async function advanceProject(env,projectId){
   }
 
   // active 후보가 남아 있으면 아직 탐색 중이므로 'unfinished' 작업 조회 없이 바로 반환(조회 1회 절약)
-  if(active>0){ await setStage(env,p,'compute'); return {stage:'cdrs_boundary_search',active,queued:null,total}; }
+  if(active>0){
+    // Recover missing initial work in bounded batches. Never restart a completed run or retry permanent failures forever.
+    const missing=await all(env.DB,`SELECT c.id FROM design_candidates c WHERE c.project_id=? AND c.research_cycle=? AND c.status='pending'
+      AND NOT EXISTS(SELECT 1 FROM simulation_runs r WHERE r.candidate_id=c.id AND r.phase='exploration')
+      AND NOT EXISTS(SELECT 1 FROM jobs j WHERE j.project_id=c.project_id AND j.type='compute_candidate' AND json_extract(j.payload_json,'$.candidate_id')=c.id AND j.status IN ('queued','running'))
+      AND (SELECT COUNT(*) FROM jobs f WHERE f.project_id=c.project_id AND f.type='compute_candidate' AND json_extract(f.payload_json,'$.candidate_id')=c.id AND f.status='failed')<3 LIMIT 100`,[projectId,cycle]);
+    if(missing.length)await ensureFrozenProtocol(env,projectId);
+    const queued=await enqueueMany(env,projectId,'compute_candidate',missing.map(c=>({candidate_id:c.id,phase:'exploration',cycle:0})),40);
+    await setStage(env,p,'compute'); return {stage:'cdrs_boundary_search',active,queued,total,waiting:queued?'recovered_missing_jobs':'inspect_failed_jobs'};
+  }
   const unfinished=await jobExists(env,projectId,'compute_candidate','exploration')||await jobExists(env,projectId,'compute_candidate','refinement')||await jobExists(env,projectId,'compute_candidate','confirmation');
   if(unfinished){ await setStage(env,p,'compute'); return {stage:'cdrs_boundary_search',active,queued:1,total}; }
   if(feasible===0){ await setStage(env,p,'compute'); return {stage:'hold',reason:'no_statistically_confirmed_feasible_candidates'}; }
@@ -176,7 +191,7 @@ export async function scheduleAll(env){
   const ps=await all(env.DB,`SELECT p.id,
     EXISTS(SELECT 1 FROM data_sources s WHERE s.project_id=p.id AND s.enabled=1 AND (s.last_fetched_at IS NULL OR datetime(s.last_fetched_at, '+' || s.cadence_minutes || ' minutes')<=datetime('now'))) due,
     EXISTS(SELECT 1 FROM jobs j WHERE j.project_id=p.id AND j.type='collect_project' AND j.status IN ('queued','running')) collecting
-    FROM projects p WHERE p.auto_run=1 AND p.status NOT IN ('complete','report_ready')
+    FROM projects p WHERE p.auto_run=1 AND (p.status NOT IN ('complete','report_ready') OR EXISTS(SELECT 1 FROM design_candidates c WHERE c.project_id=p.id AND c.research_cycle=p.research_cycle AND c.status='pending'))
     AND (NOT EXISTS(SELECT 1 FROM jobs a WHERE a.project_id=p.id AND a.type='advance_project' AND a.status IN ('queued','running'))
       OR (NOT EXISTS(SELECT 1 FROM jobs b WHERE b.project_id=p.id AND b.type='collect_project' AND b.status IN ('queued','running'))
         AND EXISTS(SELECT 1 FROM data_sources d WHERE d.project_id=p.id AND d.enabled=1 AND (d.last_fetched_at IS NULL OR datetime(d.last_fetched_at, '+' || d.cadence_minutes || ' minutes')<=datetime('now')))))

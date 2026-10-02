@@ -344,7 +344,7 @@ export async function computeCandidate(env,projectId,candidateId,phase='explorat
 }
 export async function enqueueRobustValidation(env,projectId){
   const proj=await one(env.DB,`SELECT research_cycle FROM projects WHERE id=?`,[projectId]); const cycle=Number(proj?.research_cycle||1);
-  const cands=await all(env.DB,`SELECT id FROM design_candidates WHERE project_id=? AND research_cycle=? AND status='confirmed_feasible' ORDER BY boundary_score DESC LIMIT 60`,[projectId,cycle]);
+  const cands=await all(env.DB,`SELECT id FROM design_candidates WHERE project_id=? AND research_cycle=? AND status='confirmed_feasible' AND (NOT EXISTS(SELECT 1 FROM simulation_runs r WHERE r.candidate_id=design_candidates.id AND r.phase='historical') OR NOT EXISTS(SELECT 1 FROM simulation_runs r WHERE r.candidate_id=design_candidates.id AND r.phase='stress')) ORDER BY boundary_score DESC LIMIT 60`,[projectId,cycle]);
   // 후보마다 'SELECT DISTINCT phase' 를 날리던 N+1 루프 → 프로젝트 단위 1회 조회(커버링 인덱스)
   const doneRows=await all(env.DB,`SELECT DISTINCT candidate_id,phase FROM simulation_runs WHERE project_id=? AND phase IN ('historical','stress')`,[projectId]);
   const done=new Set(doneRows.map(r=>`${r.candidate_id}|${r.phase}`));

@@ -22,6 +22,7 @@ export function checklist(t) {
   if (!rv.cluster_bootstrap?.B) items.push('반복측정 인간실험의 참가자-군집 bootstrap 불확실성 추정이 아직 없습니다.');
   if (pn.n && pn.estimated / pn.n > 0.5) items.push(`위기 사례 ${pn.n}건 중 reconstructed 자료가 ${pn.estimated}건(${pct(pn.estimated / pn.n, 0)})입니다. 결과는 이 재구성 규칙에 조건부임을 본문과 표에 유지하십시오.`);
   if (t.empirical.readiness !== 'FULL_EPISODE_PANEL') items.push(`실증 패널이 완전하지 않습니다(${t.empirical.complete_rows}/${t.empirical.target_rows}).`);
+  if(c.by_class.unevaluated)items.push(`미평가 후보 ${c.by_class.unevaluated}개: 연산 완료 전 진행 보고서이며 최종 연구결과가 아닙니다.`);
   if (!c.by_class.confirmed) items.push('CONFIRMED 후보가 없습니다. 제약조건 또는 설계공간을 재검토해야 합니다.');
   if (!t.reproducibility.protocol?.hash) items.push('확증 분석 전에 동결된 연구 프로토콜 해시가 없습니다.');
   if (lc?.identification_status==='PROXY_ONLY') items.push('FP/FN 비용은 직접 관측된 사회적 비용이 아니라 peak-outflow 기반 경험적 proxy입니다. 직접 비용 추정치로 표현하지 마십시오.');
@@ -51,7 +52,7 @@ function fallbackNarrative(t) {
   const decision = t.approval?.decision || '미확정';
   const abstract = `본 보고서는 ${cleanTex(t.project.name)}에 대한 CDRS 실행 결과를 요약한다. 설계 후보 ${c.total}개 중 ${c.by_class.confirmed || 0}개(${pct(c.total ? (c.by_class.confirmed || 0) / c.total : 0)})가 모든 제약을 통과해 위임 가능으로 확인되었고, 최종 판정은 ${decision}(Evidence Level ${t.approval?.evidence_level ?? '-'})이다.${b ? ` 선택된 설계는 추정기 ${estName(b.estimator)}, σ=${b.sigma}, α=${b.alpha}, K=${b.K}, d=${b.d}이며 Minimax Regret은 ${f(b.max_regret, 4)}이다.` : ''}${rv.n ? ` 인간 검토자 ${rv.n}건(참가자 ${rv.participants}명)에서 적정 의존율은 ${pct(rv.arr.p)}로 추정되었다.` : ''}`;
   const discussion = [
-    top ? `추정기별로는 ${estName(top.estimator)}의 위임 가능 비율이 ${pct(top.share)}로 가장 높았다(표 6). 다만 후보 수가 추정기마다 제한적이므로 신뢰구간의 폭을 함께 고려해야 한다.` : '',
+    top?.share > 0 ? `추정기별로는 ${estName(top.estimator)}의 위임 가능 비율이 ${pct(top.share)}로 가장 높았다(표 6). 다만 후보 수가 추정기마다 제한적이므로 신뢰구간의 폭을 함께 고려해야 한다.` : '',
     `현재 τ 수준은 ${[...new Set(c.list.map(x=>x.tau))].join(', ')}, d 수준은 ${[...new Set(c.list.map(x=>x.d))].join(', ')}이다. 한 수준뿐이면 해당 지연의 효과와 상호작용은 식별할 수 없다. K0/K1은 정의상 전량 검토이므로 B 상한이 1 미만일 때의 탈락은 실증 발견이 아니다. 추정기별 주변 비율은 신뢰도 정의와 base 공변량 차이에 조건부이며, 동일 환경의 신뢰도 절제 결과와 교정오차를 함께 확인해야 한다.`,
     `σ와 α의 상호작용은 그림 1과 표 5에 나타난 바와 같이 정보오차가 커질수록 위임 가능 비율이 어떻게 달라지는지를 보여 준다.`,
     rv.n ? `인간 관측의 표본은 ${rv.participants}명으로, 30명 기준 ${rv.participants>=30?'충족':'미달'}이다. 기록에서 AI 오답 수용률은 AI 오답 수용률은 ${pct(rv.false_accept.p)}, 정정 개입률은 ${pct(rv.correct_override.p)}였다. 이 비율을 시뮬레이션에 실제 반영했는지는 현재 revision의 검토자 모델과 재계산 기록으로 확인해야 하며 관측 수만으로 반영을 주장하지 않는다.` : '인간 검토자 관측이 없어 인간 행동 보정은 반영되지 않았다.'
@@ -99,7 +100,7 @@ export function buildMarkdown(t, ai, sourceNote) {
     L.push('> 열린재정·e나라도움 공개 API는 재정·보조사업의 집행환경 및 사업현황을 제공하는 외부 공변량 계층이다. 공개자료만으로 개별 부정수급 여부나 지급정지 정답 라벨을 확보했다고 해석하지 않는다.', ''); }
 
   L.push('## 4. 시뮬레이션 결과', '', '### 4.1 실행 개요', '', '**표 4. 단계별 시뮬레이션 실행량**', '', mdTable(['단계', '실행 수', '에피소드 수', '결정 수'], t.simulation.phases.map(p => [p.phase, p.runs, p.episodes, p.decisions])), '');
-  L.push('### 4.2 위임 가능 영역', '', `설계 후보 ${c.total}개 중 CONFIRMED ${c.by_class.confirmed || 0}개(${pct(c.total ? (c.by_class.confirmed || 0) / c.total : 0)}), BOUNDARY ${c.by_class.boundary || 0}개, INFEASIBLE ${c.by_class.infeasible || 0}개${c.by_class.provisional ? `, 잠정 ${c.by_class.provisional}개` : ''}로 분류되었다.`, figLine(1));
+  L.push('### 4.2 위임 가능 영역', '', `설계 후보 ${c.total}개 중 CONFIRMED ${c.by_class.confirmed || 0}개(${pct(c.total ? (c.by_class.confirmed || 0) / c.total : 0)}), UNEVALUATED ${c.by_class.unevaluated || 0}개, BOUNDARY ${c.by_class.boundary || 0}개, INFEASIBLE ${c.by_class.infeasible || 0}개${c.by_class.provisional ? `, 잠정 ${c.by_class.provisional}개` : ''}로 분류되었다.`, figLine(1));
   const lv = (k, n) => c.dims[k].map(e => [n, e.level, e.total, e.confirmed, cip(e)]);
   L.push('### 4.3 설계 변수별 위임 가능 비율', '', '**표 5. 변수 수준별 CONFIRMED 비율 (95% Wilson 구간)**', '', mdTable(['변수', '수준', '후보 수', 'CONFIRMED', '비율 [95% CI]'], [...lv('sigma', 'σ'), ...lv('tau', 'τ'), ...lv('alpha', 'α'), ...lv('K', 'K'), ...lv('d', 'd'), ...lv('W', 'W'), ...lv('m', 'm')]), '', '> 주의: 수준별 비율은 다른 변수를 통제하지 않은 주변(marginal) 비율이며 인과효과가 아니다.', '');
   L.push('### 4.4 추정기 비교', '', '**표 6. 추정기별 성능 (K2/K3 후보 평균; K0/K1 점검 기준선 제외)**', '', mdTable(['추정기', '후보 수', 'CONFIRMED', '비율 [95% CI]', '평균 손실', 'FP(정지 오판)', 'FN(정지 누락)', '검토부담', '복구시간'], c.estimators.map(e => [estName(e.estimator), e.total, e.confirmed, cip(e), f(e.loss_mean), f(e.fp_rate), f(e.fn_rate), f(e.review_burden), f(e.recovery_time)])), '', figLine(2));
@@ -149,10 +150,11 @@ export async function generateReport(env, projectId) {
   const md = buildMarkdown(t, merged, note), id = uid('report'), p = await one(env.DB, `SELECT name FROM projects WHERE id=?`, [projectId]);
   const proj=await one(env.DB,`SELECT research_cycle,evidence_revision FROM projects WHERE id=?`,[projectId]);
   await run(env.DB, `INSERT INTO reports(id,project_id,kind,title,content_markdown,data_json,created_at,research_cycle,evidence_revision) VALUES(?,?,?,?,?,?,?,?,?)`, [id, projectId, 'paper_summary', `${p?.name || 'DCV'} 연구결과`, md, JSON.stringify({ ai_meta: ai._ai, narrative: merged, checklist: checklist(t), figures: figureCatalog(t), summary: { decision: t.approval?.decision, candidates: t.candidates.total, confirmed: t.candidates.by_class.confirmed, reviewer_n: t.reviewer.n } }), nowIso(),Number(proj?.research_cycle||1),Number(proj?.evidence_revision||0)]);
+  const incomplete=(t.candidates.by_class.unevaluated||0)>0 || !t.candidates.total;
   const signed=await one(env.DB, `SELECT id FROM approvals WHERE project_id=? AND research_cycle=? AND evidence_revision=? AND stale_at IS NULL AND decision='SCIENTIFICALLY_APPROVED' ORDER BY created_at DESC LIMIT 1`, [projectId,Number(proj?.research_cycle||1),Number(proj?.evidence_revision||0)]);
-  await run(env.DB, `UPDATE projects SET current_stage=?,status=?,updated_at=? WHERE id=?`, [signed?'complete':'scientific_review',signed?'complete':'report_ready',nowIso(), projectId]);
+  await run(env.DB, `UPDATE projects SET current_stage=?,status=?,updated_at=? WHERE id=?`, [incomplete?'compute':signed?'complete':'scientific_review',incomplete?'running':signed?'complete':'report_ready',nowIso(), projectId]);
   await audit(env, projectId, 'agent', 'report.generated', 'report', id, { approval: t.approval?.decision, ai: ai._ai });
-  return { id, markdown: md, content_markdown: md, thesis: t, ai };
+  return { id, draft:incomplete, markdown: md, content_markdown: md, thesis: t, ai };
 }
 
 function rvLimit(t) {

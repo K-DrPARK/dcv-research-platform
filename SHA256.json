@@ -1,0 +1,19 @@
+{
+  "src/index.js": "027e9c69f7ee1dd061031ebdf44a1c351cb34439d05b0c9c5252521cc6a155d9",
+  "src/lib/orchestrator.js": "008130e74f486a030129b6eb468e8db4d3702eaffc52f98fbfe7f86c05b3b1bf",
+  "src/lib/compute.js": "092898c6946cded61b5193641806185f77c9b3563d959fd93dcb444316bcaa05",
+  "src/lib/thesis.js": "028af837ed14f1312d798c64c4c2286adad5040efd921da082771f4dc748179d",
+  "src/lib/report.js": "a19f9d2f323c0c4a0e61ab378c31e0dac813afcf3264d6b8f6bf14364af15295",
+  "src/lib/util.js": "e5018aedabc4e4847a0b1904e54f7e4c21eb291929c5700b63b414b96c440dfe",
+  "src/lib/lab_code_bundle.js": "44b3fdd507c8cfefb61a5b803f71ae9f8d466fc668dd42f1f6639bc1c94cef11",
+  "public/app.js": "2af93f5525b15f2930d4bf73b156f78206bbd9b418911af2a2a349d35f916af8",
+  "public/figures.js": "54e7c9065f04951c6de8bd6c291146a157f5dd3f4dc36a99c44bd90adae5b0b2",
+  "public/thesis.js": "d507e31e92293377ba2f2af8352d52b29a39c6d9cd0ed747bbc7f84e058dacc8",
+  "public/index.html": "20a15fbc9290e33a091d286665379f82d96c82038838220bb863d3d4a2111870",
+  "package.json": "c2ab16cfa1824ff48057e71dea367f4df05a7f0d7b733e4e780113df8db708c5",
+  "package-lock.json": "7e098fea0c08aa22ee5f406a6f5a975a5825d127490b2c9be51a73137ff7d878",
+  "migrations/0020_job_candidate_recovery.sql": "fd377f8e346dbdfaca17fa2ff7b723bec5515b5c8cd094596a82b1d4426c7dea",
+  "tests/pipeline_recovery.test.mjs": "2a3ad4e12bbc10eed789e45054217d238a3d32d12d583ebfa90b9c4263b48c20",
+  "docs/pipeline-recovery-0.6.2.md": "91edb9932a8eb1b86119e5fa24a03c6189fd9ae0b4b0944508206f060e817d3c",
+  "docs/recovery-changed-files.md": "6699e43271788bd351dceaee8074158d67881ba28e33bfa1a9b369fc997849bc"
+}

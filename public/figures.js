@@ -22,8 +22,8 @@ export function figureCatalog(t) {
   if ((cand.finalists||[]).length) figs.push({ n: 3, file: 'fig3_regret_ranking', title: '강건 후보의 Minimax Regret 순위 (낮을수록 우수)' });
   if ((reviewer.by_confidence||[]).length) figs.push({ n: 4, file: 'fig4_reviewer_reliance', title: 'AI 신뢰도별 인간 검토자 수용률 (AI 정답/오답 구분, 95% CI)' });
   if (Number(empirical?.panel?.n||0)) figs.push({ n: 5, file: 'fig5_episode_panel', title: '위기 사례 패널: 최대 유출률 대비 심각도 (파산 여부 구분)' });
-  if ((vm.rows||[]).length) figs.push({ n: 6, file: 'fig6_external_validation_matrix', title: '후보별 External Validation Matrix (Historical · Synthetic · Adversarial · BIS · ECB · Human)' });
-  if ((sf.stages||[]).length) figs.push({ n: 7, file: 'fig7_delegation_evidence_funnel', title: 'Delegation Evidence Funnel: 현재 프로젝트 실제 검증결과에 따른 후보 생존 흐름' });
+  figs.push({ n: 6, file: 'fig6_external_validation_matrix', title: '후보별 External Validation Matrix (Historical · Synthetic · Adversarial · BIS · ECB · Human)' });
+  figs.push({ n: 7, file: 'fig7_delegation_evidence_funnel', title: 'Delegation Evidence Funnel: 현재 프로젝트 실제 검증결과에 따른 후보 생존 흐름' });
   return figs;
 }
 
@@ -87,7 +87,7 @@ export function figRegret(t) {
 export function figExternalValidationMatrix(t) {
   const vm=t.validation_matrix||t.simulation?.validation_matrix||{rows:[],stages:[],summary:[]};
   const rows=vm.rows||[],stages=vm.stages||[];
-  if(!rows.length||!stages.length)return wrap(720,200,text(360,100,'External validation matrix unavailable',{anchor:'middle',size:16,weight:700}),'후보별 external validation matrix');
+  if(!rows.length||!stages.length)return wrap(720,200,text(360,100,'검증 결과 미수집 · 후보 연산 및 외부 검증 대기',{anchor:'middle',size:16,weight:700}),'후보별 external validation matrix');
   const rowH=rows.length>90?12:rows.length>50?15:20,W=1080,m={l:300,r:110,t:82,b:94},colW=(W-m.l-m.r)/stages.length,H=m.t+m.b+rows.length*rowH;
   const fill={PASS:C.ok,FAIL:C.bad,HOLD:C.warn,MISSING:'#d9d9d9'},glyph={PASS:'✓',FAIL:'×',HOLD:'△',MISSING:'–'};
   let body=text(m.l,28,'External Validation Matrix',{size:17,weight:700})+text(m.l,49,'Historical · Synthetic · Adversarial · BIS · ECB · Human 검증층의 후보별 생존 상태',{size:11.5,fill:C.mute});
@@ -101,7 +101,7 @@ export function figExternalValidationMatrix(t) {
 
 export function figDelegationEvidenceFunnel(t) {
   const f=t.survival_funnel||{stages:[]},stages=(f.stages||[]);
-  if(stages.length<2)return wrap(760,220,text(380,110,'Delegation evidence funnel unavailable',{anchor:'middle',size:16,weight:700}),'Delegation evidence funnel');
+  if(stages.length<2)return wrap(760,220,text(380,110,'생존율 미산출 · 실제 검증 결과 대기',{anchor:'middle',size:16,weight:700}),'Delegation evidence funnel');
   const W=1080,cx=465,top=108,stepH=68,gap=10,maxW=760,minW=165,initial=Math.max(1,Number(f.initial_candidates||stages[0]?.survivors||1));
   const lastBottom=top+(stages.length-1)*(stepH+gap)+stepH;
   const footerTop=lastBottom+34,footerH=96,H=footerTop+footerH;
@@ -123,7 +123,7 @@ export function figDelegationEvidenceFunnel(t) {
   body+=`<line x1="90" x2="990" y1="${footerTop-16}" y2="${footerTop-16}" stroke="${C.grid}"/>`;
   body+=text(cx,footerTop,`Final strict survivors: ${f.final_survivors??0} / ${f.initial_candidates??0} (${pct(Number(f.final_rate||0))})`,{anchor:'middle',size:14,weight:700});
   body+=text(cx,footerTop+25,'Strict cumulative PASS: HOLD와 candidate-level N/A는 생존으로 계산하지 않습니다.',{anchor:'middle',size:10.5,fill:C.mute});
-  body+=text(cx,footerTop+43,'검증층 전체가 N/A인 경우에만 직전 단계의 생존 후보 수를 그대로 이월합니다.',{anchor:'middle',size:10.5,fill:C.mute});
+  body+=text(cx,footerTop+43,'전체 층이 미검증이면 최종 생존은 0이며, 층별 이월 수는 통과 증거가 아닙니다.',{anchor:'middle',size:10.5,fill:C.mute});
   body+=text(cx,footerTop+66,`Source snapshot: current project · Cycle ${cycle} · Evidence r${rev} · ${f.generated_at||t.generated_at||'-'}`,{anchor:'middle',size:9.7,fill:C.mute});
   return wrap(W,H,body,'검증층을 통과하며 축소되는 위임 후보 생존 퍼널');
 }

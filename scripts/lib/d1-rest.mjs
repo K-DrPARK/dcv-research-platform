@@ -1,3 +1,4 @@
+import {diagnoseD1,RunnerError} from './runner-diagnostics.mjs';
 // Trusted Actions runtime only. No SQL proxy is exposed by the public Worker.
 export function restStatement(sql, params=[]) {
   let out='',values=[],i=0,quote=null,line=false,block=false;
@@ -27,10 +28,10 @@ export function createD1Rest({accountId,databaseId,token,fetchImpl=fetch,interva
     for(let attempt=0;attempt<3;attempt++){
       if(calls>=maxCalls)throw new Error('runner_api_budget_exhausted');
       await sleep(Math.max(0,last+intervalMs-Date.now()));last=Date.now();calls++;
-      const response=await fetchImpl(`https://api.cloudflare.com/client/v4/accounts/${accountId}/d1/database/${databaseId}/query`,{method:'POST',headers:{authorization:`Bearer ${token}`,'content-type':'application/json'},body:JSON.stringify({batch:statements}),signal:AbortSignal.timeout(60000)});
+      let response;try{response=await fetchImpl(`https://api.cloudflare.com/client/v4/accounts/${accountId}/d1/database/${databaseId}/query`,{method:'POST',headers:{authorization:`Bearer ${token}`,'content-type':'application/json'},body:JSON.stringify({batch:statements}),signal:AbortSignal.timeout(60000)});}catch{throw new RunnerError('D1_NETWORK_FAILED','D1 connection failed or timed out. Check Cloudflare availability; writes are not blindly retried.');}
       if(response.status===429&&attempt<2){await sleep(Math.min(5000,Number(response.headers.get('retry-after')||2)*1000));continue;}
-      const json=await response.json();
-      if(!response.ok||!json.success||!Array.isArray(json.result)||json.result.some(r=>r.success===false))throw new Error(`D1 REST request failed (${response.status}; codes ${(json.errors||[]).map(e=>e.code).join(',')})`);
+      let json;try{json=await response.json();}catch{throw new RunnerError('D1_RESPONSE_NOT_JSON','Cloudflare returned a non-JSON response.',{http_status:response.status});}
+      if(!response.ok||!json.success||!Array.isArray(json.result)||json.result.some(r=>r.success===false))throw diagnoseD1(response.status,json);
       return json.result;
     }
   };

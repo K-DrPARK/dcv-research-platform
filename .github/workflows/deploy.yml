@@ -13,11 +13,13 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: 22
+          node-version: '24'
           cache: npm
       - run: npm install
+      - name: Verify required migration files
+        run: node scripts/verify-migrations.mjs
       - name: Unit tests
-        run: npm test
+        run: node --test --test-reporter=spec tests/*.test.mjs
       - name: Verify pinned D1 binding
         run: npm run storage:verify
         env:
